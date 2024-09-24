@@ -7,6 +7,8 @@ class Lexemes(IntEnum):
     """
     EMPTY = auto()
     NUMBER = auto()
+    BOOLEAN = auto()
+    NULL = auto()
 
     COMMA = auto()
     END_LINE = auto()
@@ -52,5 +54,9 @@ class Lexemes(IntEnum):
             return Lexemes.KEYWORD
         elif word in ('and', 'or', 'not'):
             return Lexemes.OP_LOGICAL
+        elif word in ('true', 'false'):
+            return Lexemes.BOOLEAN
+        elif word in ('null', ):
+            return Lexemes.NULL
         else:
             return Lexemes.IDENTIFIER

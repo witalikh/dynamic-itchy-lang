@@ -1,6 +1,6 @@
 from .ast import (
     ASTRoot,
-    IfElseNode, WhileNode, OperatorNode, ComparisonPolyOperatorNode,
+    IfElseNode, WhileNode, OperatorNode, ComparisonPolyOperatorNode, BooleanNode, NullNode,
     LeftAssociativePolyOperatorNode, UnaryOperatorNode, FunctionDeclarationNode,
     NumberNode, ListNode, IdentifierNode,
     ScopeNode
@@ -136,9 +136,13 @@ class Parser:
         self.consume(Lexemes.KEYWORD)
         return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
 
-    def parse_while(self) -> WhileNode:
-        self.consume(Lexemes.KEYWORD)
-        return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
+    # def parse_promise(self) -> WhileNode:
+    #     self.consume(Lexemes.KEYWORD)
+    #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
+
+    # def parse_class(self) -> WhileNode:
+    #     self.consume(Lexemes.KEYWORD)
+    #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
 
     def parse_function(self) -> FunctionDeclarationNode:
 
@@ -371,6 +375,17 @@ class Parser:
                 line=self.line, pos=self.pos
             )
 
+        elif self.is_consumable(Lexemes.BOOLEAN):
+            # note: kwargs order is important
+            sub_result = BooleanNode(
+                value=self.consume(Lexemes.NUMBER),
+                line=self.line, pos=self.pos
+            )
+
+        elif self.is_consumable(Lexemes.NULL):
+            self.consume(Lexemes.NULL)
+            sub_result = NullNode(self.line, self.pos)
+
         elif self.is_consumable(Lexemes.OPEN_SQUARE_BRACKET):
             sub_result = self.parse_list()
 
@@ -398,43 +413,13 @@ class Parser:
         elif self.is_consumable(Lexemes.KEYWORD, 'function'):
             sub_result = self.parse_function()
 
+        # elif self.is_consumable(Lexemes.KEYWORD, 'class'):
+        #     sub_result = self.parse_class()
+
         else:
             self.error(f"Invalid terminal type: {self.curr_token[0].name}")
 
         return sub_result
-
-    # def parse_identifier(self) -> NumberNode | IdentifierNode:
-    #     identifier = self.consume(Lexemes.IDENTIFIER)
-    #
-    #     if identifier == 'pi':
-    #         return None, math.pi
-    #     if identifier == 'e':
-    #         return None, math.e
-    #     if identifier == "null":
-    #         return None, None
-    #     if identifier == 'sin':
-    #         return None, math.sin
-    #     if identifier == 'cos':
-    #         return None, math.cos
-    #     if identifier == 'tan':
-    #         return None, math.tan
-    #     if identifier == 'sqrt':
-    #         return None, math.sqrt
-    #     if identifier == 'ln':
-    #         return None, math.log
-    #     if identifier == 'abs':
-    #         return None, abs
-    #     if identifier == 'print':
-    #         return None, print
-    #     if identifier == 'lcm':
-    #         return None, math.lcm
-    #     if identifier == 'gcd':
-    #         return None, math.gcd
-    #     if identifier == 'min':
-    #         return None, min
-    #     if identifier == 'max':
-    #         return None, max
-    #     return identifier, self.environment.get(identifier, None)
 
     def parse_function_args(self) -> list[ASTRoot]:
 

@@ -319,6 +319,28 @@ class NumberNode(ASTRoot):
         return LiteralWrapper(self.number)
 
 
+class BooleanNode(ASTRoot):
+    def __init__(self, line: int, pos: int, value: str):
+        super().__init__(line, pos)
+        if value == 'true':
+            self.value = True
+        elif value == 'false':
+            self.value = False
+        else:
+            raise NotImplementedError
+
+    def evaluate(self, environment: dict):
+        return LiteralWrapper(int(self.value))
+
+
+class NullNode(ASTRoot):
+    def __init__(self, line: int, pos: int):
+        super().__init__(line, pos)
+
+    def evaluate(self, environment: dict):
+        return LiteralWrapper(None)
+
+
 class StringNode(ASTRoot):
     def __init__(self, line: int, pos: int, string):
         super().__init__(line, pos)
