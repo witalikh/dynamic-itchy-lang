@@ -25,6 +25,10 @@ class DIZeroDivisionError(DIBaseException):
     pass
 
 
+class DIIndexError(DIBaseException):
+    pass
+
+
 class DITypeError(DIBaseException):
     pass
 

@@ -6,7 +6,10 @@ class Lexemes(IntEnum):
 
     """
     EMPTY = auto()
+    STRING = auto()
     NUMBER = auto()
+    FLOAT = auto()
+    INTEGER = auto()
     BOOLEAN = auto()
     NULL = auto()
 

@@ -30,6 +30,10 @@ class Lexer:
         )
 
     @property
+    def prev_char(self) -> str:
+        return self.text[self.i - 1] if 1 <= self.i < len(self.text) else None
+
+    @property
     def curr_char(self) -> str:
         return self.text[self.i] if self.i < len(self.text) else None
 
@@ -144,8 +148,11 @@ class Lexer:
             token = self.lex_operator()
 
         # keywords and identifiers
-        elif self.curr_char.isalpha():
+        elif self.curr_char.isalpha() or self.curr_char == '_':
             token = self.lex_word()
+
+        elif self.curr_char == "\"":
+            token = self.lex_string()
 
         else:
             self.error()
@@ -234,13 +241,15 @@ class Lexer:
 
         # convert into standard numeric
         try:
-            if allow_float:
-                num = float(num)
-            else:
+            if not first_dot_met:
                 if base == 4:
                     num = num[2:]
                 num = int(num, base)
-            return Lexemes.NUMBER, num
+                return Lexemes.INTEGER, num
+            else:
+                num = float(num)
+                return Lexemes.FLOAT, num
+
         except ValueError:
             self.error()
 
@@ -347,19 +356,42 @@ class Lexer:
             self.pass_forward(1)
             return Lexemes.OP_COALESCE, '?'
 
-        elif self.curr_char == "#":
-            self.pass_forward(1)
-            return Lexemes.OP_INDEX, '#'
-
         else:
             self.error()
 
     def lex_word(self) -> Tuple[Lexemes, str]:
 
         k = self.i
-        while k < len(self.text) and self.text[k].isalpha():
+        while k < len(self.text) and any((
+            self.text[k].isalpha(), self.text[k] == '_', k != self.i and self.text[k].isdigit(),
+        )):
             k += 1
         name = self.text[self.i:k]
 
         self.pass_forward(k - self.i)
         return Lexemes.identify_word(name), name
+
+    def lex_string(self) -> Tuple[Lexemes, str]:
+
+        k = self.i
+        # skip first quote
+        k += 1
+
+        # escaped backslash
+        escaped_backslash = False
+
+        while k < len(self.text) and (escaped_backslash or self.curr_char != '"') and self.curr_char != '\n':
+            if self.curr_char == '\\':
+                escaped_backslash = not escaped_backslash
+            if escaped_backslash and self.curr_char != '\\':
+                escaped_backslash = False
+            k += 1
+        else:
+            if self.curr_char != '"' or escaped_backslash:
+                self.error()
+            # skip last quotation mark
+            k += 1
+        name = self.text[self.i:k]
+
+        self.pass_forward(k - self.i)
+        return Lexemes.STRING, name

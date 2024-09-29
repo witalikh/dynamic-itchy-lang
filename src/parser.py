@@ -2,7 +2,7 @@ from .ast import (
     ASTRoot,
     IfElseNode, WhileNode, OperatorNode, ComparisonPolyOperatorNode, BooleanNode, NullNode,
     LeftAssociativePolyOperatorNode, UnaryOperatorNode, FunctionDeclarationNode,
-    NumberNode, ListNode, IdentifierNode,
+    NumberNode, ListNode, IdentifierNode, StringNode,
     ScopeNode
 )
 from .exceptions import DIStaticSyntaxError
@@ -84,94 +84,10 @@ class Parser:
         while self.is_consumable(Lexemes.END_LINE):
             self.consume(Lexemes.END_LINE)
 
-        # if self.is_consumable(Lexemes.OPEN_SCOPE):
-        #     value: ScopeNode = self.parse_scope()
-        # elif self.is_consumable(Lexemes.KEYWORD, 'if'):
-        #     value: IfElseNode = self.parse_if()
-        # elif self.is_consumable(Lexemes.KEYWORD, 'while'):
-        #     value: WhileNode = self.parse_while()
-        # elif self.is_consumable(Lexemes.KEYWORD, 'promise'):
-        #     value: WhileNode = self.parse_promise()
-        # else:
-        value: ASTRoot = self.parse_assignment()
-
+        value: ASTRoot = self.parse_logical_or()
         while self.is_consumable(Lexemes.END_LINE):
             self.consume(Lexemes.END_LINE)
         return value
-
-    def parse_scope(self) -> ScopeNode:
-
-        if not self.is_consumable(Lexemes.OPEN_SCOPE):
-            instruction = self.parse_expression()
-            scope_node = ScopeNode(instruction.line, instruction.pos)
-            scope_node.instructions.append(instruction)
-            return scope_node
-
-        self.consume(Lexemes.OPEN_SCOPE)
-        scope_node = ScopeNode(self.line, self.pos)
-        while not self.is_consumable(Lexemes.CLOSED_SCOPE):
-            scope_node.instructions.append(self.parse_expression())
-        self.consume(Lexemes.CLOSED_SCOPE)
-
-        return scope_node
-
-    def parse_if(self) -> IfElseNode:
-
-        _ = self.consume(Lexemes.KEYWORD)
-
-        if_else_node = IfElseNode(self.line, self.pos)
-        if_else_node.add_branch(self.parse_condition(), self.parse_scope())
-
-        while self.is_consumable(Lexemes.KEYWORD, 'elif'):
-            _ = self.consume(Lexemes.KEYWORD)
-            if_else_node.add_branch(self.parse_condition(), self.parse_scope())
-
-        if self.is_consumable(Lexemes.KEYWORD, 'else'):
-            self.consume(Lexemes.KEYWORD)
-            if_else_node.add_branch(None, self.parse_scope())
-
-        return if_else_node
-
-    def parse_while(self) -> WhileNode:
-        self.consume(Lexemes.KEYWORD)
-        return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
-
-    # def parse_promise(self) -> WhileNode:
-    #     self.consume(Lexemes.KEYWORD)
-    #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
-
-    # def parse_class(self) -> WhileNode:
-    #     self.consume(Lexemes.KEYWORD)
-    #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
-
-    def parse_function(self) -> FunctionDeclarationNode:
-
-        _ = self.consume(Lexemes.KEYWORD)
-        line, pos = self.line, self.pos
-        params = []
-
-        self.consume(Lexemes.OPEN_BRACKET)
-        while not self.is_consumable(Lexemes.CLOSED_BRACKET):
-            params.append(
-                IdentifierNode(
-                    name=self.consume(Lexemes.IDENTIFIER),
-                    line=self.line, pos=self.pos  # Intentional code design: firstly consume, then get location
-                )
-            )
-            if self.is_consumable(Lexemes.CLOSED_BRACKET):
-                break
-
-            _ = self.consume(Lexemes.COMMA)
-            while self.is_consumable(Lexemes.END_LINE):
-                self.consume(Lexemes.END_LINE)
-        self.consume(Lexemes.CLOSED_BRACKET)
-        return FunctionDeclarationNode(line, pos, params, self.parse_scope())
-
-    def parse_condition(self) -> ASTRoot:
-        self.consume(Lexemes.OPEN_BRACKET)
-        result: ASTRoot = self.parse_logical_or()
-        self.consume(Lexemes.CLOSED_BRACKET)
-        return result
 
     def parse_logical_or(self) -> OperatorNode | ASTRoot:
 
@@ -341,6 +257,20 @@ class Parser:
         else:
             return self.parse_function_call()
 
+    def _parse_comma_separated_args(self, opening: Lexemes, closing: Lexemes) -> list[ASTRoot]:
+        res = []
+        self.consume(opening)
+        while not self.is_consumable(closing):
+            res.append(self.parse_expression())
+            if self.is_consumable(closing):
+                break
+
+            self.consume(Lexemes.COMMA)
+            while self.is_consumable(Lexemes.END_LINE):
+                self.consume(Lexemes.END_LINE)
+        self.consume(closing)
+        return res
+
     def parse_function_call(self) -> OperatorNode | ASTRoot:
         operand = self.parse_indexation()
         if not self.is_consumable(Lexemes.OPEN_BRACKET):
@@ -348,30 +278,45 @@ class Parser:
 
         chain_of_args = [operand]
         while self.is_consumable(Lexemes.OPEN_BRACKET):
-            chain_of_args.append(self.parse_function_args())
+            chain_of_args.append(self._parse_comma_separated_args(Lexemes.OPEN_BRACKET, Lexemes.CLOSED_BRACKET))
 
         return OperatorNode(operand.line, operand.pos, '$func', chain_of_args)
 
     def parse_indexation(self) -> OperatorNode | ASTRoot:
 
         operand = self.parse_primary()
-        if not self.is_consumable(Lexemes.OP_INDEX):
+        if not self.is_consumable(Lexemes.OPEN_SQUARE_BRACKET):
             return operand
 
         chain_of_args = [operand]
 
-        while self.is_consumable(Lexemes.OP_INDEX):
-            self.consume(Lexemes.OP_INDEX)
-            chain_of_args.append(self.parse_primary())
+        while self.is_consumable(Lexemes.OPEN_SQUARE_BRACKET):
+            chain_of_args.append(
+                self._parse_comma_separated_args(Lexemes.OPEN_SQUARE_BRACKET, Lexemes.CLOSED_SQUARE_BRACKET)
+            )
 
         return OperatorNode(operand.line, operand.pos, '$index', chain_of_args)
 
     def parse_primary(self) -> ASTRoot:
 
-        if self.is_consumable(Lexemes.NUMBER):
+        if self.is_consumable(Lexemes.INTEGER):
             # note: kwargs order is important
             sub_result = NumberNode(
-                number=self.consume(Lexemes.NUMBER),
+                number=self.consume(Lexemes.INTEGER),
+                line=self.line, pos=self.pos
+            )
+
+        elif self.is_consumable(Lexemes.FLOAT):
+            # note: kwargs order is important
+            sub_result = NumberNode(
+                number=self.consume(Lexemes.FLOAT),
+                line=self.line, pos=self.pos
+            )
+
+        elif self.is_consumable(Lexemes.STRING):
+            # note: kwargs order is important
+            sub_result = StringNode(
+                string=self.consume(Lexemes.STRING),
                 line=self.line, pos=self.pos
             )
 
@@ -421,23 +366,6 @@ class Parser:
 
         return sub_result
 
-    def parse_function_args(self) -> list[ASTRoot]:
-
-        res = []
-
-        self.consume(Lexemes.OPEN_BRACKET)
-        while not self.is_consumable(Lexemes.CLOSED_BRACKET):
-            sub_result = self.parse_assignment()
-            res.append(sub_result)
-            if self.is_consumable(Lexemes.CLOSED_BRACKET):
-                break
-
-            _ = self.consume(Lexemes.COMMA)
-            while self.is_consumable(Lexemes.END_LINE):
-                self.consume(Lexemes.END_LINE)
-        self.consume(Lexemes.CLOSED_BRACKET)
-        return res
-
     def parse_list(self) -> ListNode:
 
         res = []
@@ -445,7 +373,7 @@ class Parser:
         self.consume(Lexemes.OPEN_SQUARE_BRACKET)
         line, pos = self.line, self.pos
         while not self.is_consumable(Lexemes.CLOSED_SQUARE_BRACKET):
-            res.append(self.parse_assignment())
+            res.append(self.parse_expression())
             if self.is_consumable(Lexemes.CLOSED_SQUARE_BRACKET):
                 break
 
@@ -454,3 +382,77 @@ class Parser:
                 self.consume(Lexemes.END_LINE)
         self.consume(Lexemes.CLOSED_SQUARE_BRACKET)
         return ListNode(line, pos, res)
+
+    def parse_scope(self) -> ScopeNode:
+
+        if not self.is_consumable(Lexemes.OPEN_SCOPE):
+            instruction = self.parse_expression()
+            scope_node = ScopeNode(instruction.line, instruction.pos)
+            scope_node.instructions.append(instruction)
+            return scope_node
+
+        self.consume(Lexemes.OPEN_SCOPE)
+        scope_node = ScopeNode(self.line, self.pos)
+        while not self.is_consumable(Lexemes.CLOSED_SCOPE):
+            scope_node.instructions.append(self.parse_expression())
+        self.consume(Lexemes.CLOSED_SCOPE)
+
+        return scope_node
+
+    def parse_if(self) -> IfElseNode:
+
+        _ = self.consume(Lexemes.KEYWORD)
+
+        if_else_node = IfElseNode(self.line, self.pos)
+        if_else_node.add_branch(self.parse_condition(), self.parse_scope())
+
+        while self.is_consumable(Lexemes.KEYWORD, 'elif'):
+            _ = self.consume(Lexemes.KEYWORD)
+            if_else_node.add_branch(self.parse_condition(), self.parse_scope())
+
+        if self.is_consumable(Lexemes.KEYWORD, 'else'):
+            self.consume(Lexemes.KEYWORD)
+            if_else_node.add_branch(None, self.parse_scope())
+
+        return if_else_node
+
+    def parse_while(self) -> WhileNode:
+        self.consume(Lexemes.KEYWORD)
+        return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
+
+    # def parse_promise(self) -> WhileNode:
+    #     self.consume(Lexemes.KEYWORD)
+    #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
+
+    # def parse_class(self) -> WhileNode:
+    #     self.consume(Lexemes.KEYWORD)
+    #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
+
+    def parse_function(self) -> FunctionDeclarationNode:
+
+        _ = self.consume(Lexemes.KEYWORD)
+        line, pos = self.line, self.pos
+        params = []
+
+        self.consume(Lexemes.OPEN_BRACKET)
+        while not self.is_consumable(Lexemes.CLOSED_BRACKET):
+            params.append(
+                IdentifierNode(
+                    name=self.consume(Lexemes.IDENTIFIER),
+                    line=self.line, pos=self.pos  # Intentional code design: firstly consume, then get location
+                )
+            )
+            if self.is_consumable(Lexemes.CLOSED_BRACKET):
+                break
+
+            _ = self.consume(Lexemes.COMMA)
+            while self.is_consumable(Lexemes.END_LINE):
+                self.consume(Lexemes.END_LINE)
+        self.consume(Lexemes.CLOSED_BRACKET)
+        return FunctionDeclarationNode(line, pos, params, self.parse_scope())
+
+    def parse_condition(self) -> ASTRoot:
+        self.consume(Lexemes.OPEN_BRACKET)
+        result: ASTRoot = self.parse_logical_or()
+        self.consume(Lexemes.CLOSED_BRACKET)
+        return result

@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
-from itertools import pairwise
+from itertools import pairwise, chain
 from typing import Self, Literal
 
-from src.exceptions import DIRuntimeSyntaxError, DITypeError, DIZeroDivisionError, DINameError, DIValueError
-from src.wrappers import LiteralWrapper
+from src.exceptions import (
+    DIRuntimeSyntaxError, DITypeError, DIZeroDivisionError,
+    DINameError, DIValueError, DIIndexError
+)
+from src.wrappers import NumericWrapper, ListWrapper, StringWrapper
 
 
 class ASTRoot(ABC):
@@ -63,7 +66,7 @@ class ASTRoot(ABC):
         return type(self).__name__.replace("Node", "")
 
     @abstractmethod
-    def evaluate(self, environment: dict) -> LiteralWrapper:
+    def evaluate(self, environment: dict) -> NumericWrapper:
         pass
 
 
@@ -101,14 +104,14 @@ class IfElseNode(ASTRoot):
             self.conditions.append(condition)
             self.branch_scopes.append(scope)
 
-    def evaluate(self, environment: dict) -> LiteralWrapper:
+    def evaluate(self, environment: dict) -> NumericWrapper:
         for condition, scope in zip(self.conditions, self.branch_scopes):
             if condition.evaluate(environment):
                 return scope.evaluate(environment)
         if self.else_scope is not None:
             return self.else_scope.evaluate(environment)
 
-        return LiteralWrapper(None)
+        return NumericWrapper(None)
 
 
 class WhileNode(ASTRoot):
@@ -118,8 +121,7 @@ class WhileNode(ASTRoot):
         self.scope = scope
 
     def evaluate(self, environment: dict):
-        result = LiteralWrapper(None)
-        # (self.condition.evaluate(environment))
+        result = NumericWrapper(None)
         while self.condition.evaluate(environment):
             result = self.scope.evaluate(environment)
         return result
@@ -132,7 +134,7 @@ class OperatorNode(ASTRoot):
         self.operands = operands or []
         self.associativity: Literal['left', 'right', 'no'] = associativity or 'left'
 
-    def evaluate(self, environment: dict):
+    def evaluate(self, environment: dict, except_last=False):
         if self.operator == 'or':
             for operand in self.operands:
                 if operand:
@@ -146,9 +148,24 @@ class OperatorNode(ASTRoot):
         elif self.operator == ':=':
             value = self.operands[-1].evaluate(environment)
             for identifier in reversed(self.operands[:-1]):
-                if not isinstance(identifier, IdentifierNode):
+                if isinstance(identifier, IdentifierNode):
+                    environment[identifier.name] = value
+                elif isinstance(identifier, OperatorNode):
+                    if identifier.operator != "$index":
+                        raise DIRuntimeSyntaxError(self.line, self.pos, "cannot assign to function call")
+
+                    inner_value = identifier.operands[0].evaluate(environment)
+                    try:
+                        for sub_operand in chain.from_iterable(identifier.operands[1:-1]):
+                            inner_value = inner_value[sub_operand.evaluate(environment)]
+                    except IndexError as e:
+                        raise DIIndexError(self.line, self.pos, str(e))
+
+                    for sub_operand in identifier.operands[-1][:-1]:
+                        inner_value = inner_value[sub_operand.evaluate(environment)]
+                    inner_value[identifier.operands[-1][-1].evaluate(environment)] = value
+                else:
                     raise DIRuntimeSyntaxError(self.line, self.pos, f"cannot assign to expression here: {identifier}")
-                environment[identifier.name] = value
             return value
         elif self.operator == '**':
             value = self.operands[-1].evaluate(environment)
@@ -180,9 +197,13 @@ class OperatorNode(ASTRoot):
             return value
 
         elif self.operator == '$index':
-            # TODO: implement indexation
-            pass
-            return LiteralWrapper(None)
+            value = self.operands[0].evaluate(environment)
+            try:
+                for sub_operand in chain.from_iterable(self.operands[1:]):
+                    value = value[sub_operand.evaluate(environment)]
+            except IndexError as e:
+                raise DIIndexError(self.line, self.pos, str(e))
+            return value
 
 
 class ComparisonPolyOperatorNode(ASTRoot):
@@ -268,7 +289,8 @@ class LeftAssociativePolyOperatorNode(ASTRoot):
                 value = lhs >> rhs
             else:
                 value = None
-        return value
+            lhs = value
+        return lhs
 
 
 class UnaryOperatorNode(ASTRoot):
@@ -316,7 +338,7 @@ class NumberNode(ASTRoot):
         self.number = number
 
     def evaluate(self, environment: dict):
-        return LiteralWrapper(self.number)
+        return NumericWrapper(self.number)
 
 
 class BooleanNode(ASTRoot):
@@ -330,7 +352,7 @@ class BooleanNode(ASTRoot):
             raise NotImplementedError
 
     def evaluate(self, environment: dict):
-        return LiteralWrapper(int(self.value))
+        return NumericWrapper(int(self.value))
 
 
 class NullNode(ASTRoot):
@@ -338,16 +360,16 @@ class NullNode(ASTRoot):
         super().__init__(line, pos)
 
     def evaluate(self, environment: dict):
-        return LiteralWrapper(None)
+        return NumericWrapper(None)
 
 
 class StringNode(ASTRoot):
-    def __init__(self, line: int, pos: int, string):
+    def __init__(self, line: int, pos: int, string: str):
         super().__init__(line, pos)
         self.string = string
 
     def evaluate(self, environment: dict):
-        return LiteralWrapper(self.string)
+        return StringWrapper(self.string)
 
 
 class ListNode(ASTRoot):
@@ -356,7 +378,7 @@ class ListNode(ASTRoot):
         self.elements = elements
 
     def evaluate(self, environment: dict):
-        return LiteralWrapper([e.evaluate(environment) for e in self.elements])
+        return ListWrapper([e.evaluate(environment) for e in self.elements])
 
 
 class IdentifierNode(ASTRoot):
