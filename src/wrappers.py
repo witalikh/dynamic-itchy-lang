@@ -332,7 +332,7 @@ class ListWrapper(AbstractTypeWrapper):
         k = k1
 
         result = ListWrapper([
-            ListWrapper([self[i][0] * self[0][j] for j in range(m)]) for i in range(n)
+            ListWrapper([self[i][0] * other[0][j] for j in range(m)]) for i in range(n)
         ])
 
         for i in range(n):

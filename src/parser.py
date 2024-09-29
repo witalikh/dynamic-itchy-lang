@@ -63,11 +63,11 @@ class Parser:
 
     @property
     def line(self):
-        return self.prev_token[2]
+        return self.prev_token[2] if self.prev_token else 0
 
     @property
     def pos(self):
-        return self.prev_token[3]
+        return self.prev_token[3] if self.prev_token else -1
 
     def parse_program(self) -> ASTRoot:
         scope_node = ScopeNode(0, 0)
