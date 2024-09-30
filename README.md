@@ -67,5 +67,14 @@ sum
 - `while` loop returns last expression from scope, executed in last iteration
 - Assignment like `a := <statement>` returns assigned value in `statement`  
 
-2. There is nothing that cannot be assigned or be an operand
-3. Never type-checked until actual calculation
+2. There is nothing that cannot be assigned or be an operand of another operator  
+    E.g.
+    ```
+   (fibonacci := function (n) if (n == 0 or n == 1) n else fibonacci(n - 2) + fibonacci(n - 1))(7) + fibonacci(11);
+   ```
+   is a valid code and returns `102` (as sum of seventh and eleventh number of Fibonacci sequence, `13` and `89`)
+
+Drawbacks: forget about `break`, `continue`, `return` and any other control-flow statement.  
+At least for now.  
+3. Never type-checked until actual calculation  
+Thus, if variable is already evaluated, no matter it placed it has value (see example above)

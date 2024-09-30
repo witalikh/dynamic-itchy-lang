@@ -53,7 +53,7 @@ class Lexemes(IntEnum):
 
     @staticmethod
     def identify_word(word: str):
-        if word in ('if', 'else', 'elif', 'for', 'while', 'function', 'promise'):
+        if word in ('if', 'else', 'elif', 'while', 'function', 'promise'):
             return Lexemes.KEYWORD
         elif word in ('and', 'or', 'not'):
             return Lexemes.OP_LOGICAL

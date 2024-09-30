@@ -78,7 +78,7 @@ class ScopeNode(ASTRoot):
     def evaluate(self, environment: dict):
         old_environment = set(environment.keys())
 
-        last = None, None
+        last = NumericWrapper(None)
         for instruction in self.instructions:
             last = instruction.evaluate(environment)
 
@@ -115,7 +115,7 @@ class IfElseNode(ASTRoot):
 
 
 class WhileNode(ASTRoot):
-    def __init__(self, line: int, pos: int, condition=None, scope=None):
+    def __init__(self, line: int, pos: int, condition=None, scope: ScopeNode = None):
         super().__init__(line, pos)
         self.condition = condition
         self.scope = scope
@@ -136,15 +136,17 @@ class OperatorNode(ASTRoot):
 
     def evaluate(self, environment: dict, except_last=False):
         if self.operator == 'or':
-            for operand in self.operands:
-                if operand:
-                    return operand
-            return self.operands[-1]
+            for operand in self.operands[:-1]:
+                result = operand.evaluate(environment)
+                if result:
+                    return result
+            return self.operands[-1].evaluate(environment)
         elif self.operator == 'and':
             for operand in self.operands:
-                if not operand:
-                    return operand
-            return self.operands[-1]
+                result = operand.evaluate(environment)
+                if not result:
+                    return result
+            return self.operands[-1].evaluate(environment)
         elif self.operator == ':=':
             value = self.operands[-1].evaluate(environment)
             for identifier in reversed(self.operands[:-1]):
@@ -251,7 +253,6 @@ class LeftAssociativePolyOperatorNode(ASTRoot):
         lhs = self.operands[0].evaluate(environment)
         iterator = zip(self.operators, self.operands[1:])
 
-        value = None
         for op, next_value in iterator:
             rhs = next_value.evaluate(environment)
 
@@ -394,4 +395,3 @@ class IdentifierNode(ASTRoot):
         if self.name in environment:
             return environment[self.name]
         raise DINameError(self.line, self.pos, f"Variable {self.name} is not defined")
-        # return LiteralWrapper(None)
