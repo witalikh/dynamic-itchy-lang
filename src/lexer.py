@@ -256,8 +256,6 @@ class Lexer:
     def lex_operator(self) -> Tuple[Lexemes, str]:
 
         # :+-*/%=<>!@#.?
-        # [[1,2,3], [4,5,6], [7,8,9]] # 2 # 1 -> [7,8,9] # 1 -> 8
-        # [[1,2,3], [4,5,6], [7,8,9]] # [2,1] -> [7,8,9] # 1 -> 8
 
         # '+', '-'
         if self.curr_char in '+-':
@@ -348,6 +346,10 @@ class Lexer:
             self.pass_forward(2)
             return Lexemes.OP_ASSIGN, ':='
 
+        elif self.curr_char == "=" and self.next_char == ">":
+            self.pass_forward(2)
+            return Lexemes.OP_IMPLICATION, "=>"
+
         elif self.curr_char == ":":
             self.pass_forward(1)
             return Lexemes.OP_KEYMAP, ':'
@@ -355,6 +357,14 @@ class Lexer:
         elif self.curr_char == "?":
             self.pass_forward(1)
             return Lexemes.OP_COALESCE, '?'
+
+        elif self.curr_char == ".":
+            self.pass_forward(1)
+            if self.curr_char == self.next_char == ".":
+                self.pass_forward(2)
+                return Lexemes.OP_ELLIPSIS, "..."
+            else:
+                return Lexemes.OP_ATTRIBUTE_ACCESS, "."
 
         else:
             self.error()

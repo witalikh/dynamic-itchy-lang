@@ -333,6 +333,17 @@ class FunctionDeclarationNode(ASTRoot):
         return func
 
 
+class EllipsisOperatorNode(ASTRoot):
+    def __init__(self, line: int, pos: int, lst):
+        super().__init__(line, pos)
+        self.elements = lst
+
+    def evaluate(self, environment: dict, in_list=False):
+        if in_list:
+            return self.elements.evaluate(environment)
+        raise DIRuntimeSyntaxError(self.line, self.pos, "Cannot use ellipsis here")
+
+
 class NumberNode(ASTRoot):
     def __init__(self, line: int, pos: int, number):
         super().__init__(line, pos)
@@ -379,7 +390,13 @@ class ListNode(ASTRoot):
         self.elements = elements
 
     def evaluate(self, environment: dict):
-        return ListWrapper([e.evaluate(environment) for e in self.elements])
+        result = []
+        for e in self.elements:
+            if isinstance(e, EllipsisOperatorNode):
+                result.extend(e.evaluate(environment, in_list=True))
+            else:
+                result.append(e.evaluate(environment))
+        return ListWrapper(result)
 
 
 class IdentifierNode(ASTRoot):

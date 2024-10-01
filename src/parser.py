@@ -1,7 +1,7 @@
 from .ast import (
     ASTRoot,
     IfElseNode, WhileNode, OperatorNode, ComparisonPolyOperatorNode, BooleanNode, NullNode,
-    LeftAssociativePolyOperatorNode, UnaryOperatorNode, FunctionDeclarationNode,
+    LeftAssociativePolyOperatorNode, UnaryOperatorNode, FunctionDeclarationNode, EllipsisOperatorNode,
     NumberNode, ListNode, IdentifierNode, StringNode,
     ScopeNode
 )
@@ -17,9 +17,6 @@ class Parser:
     def __init__(self, lexer: Lexer) -> None:
         self.tokens = [lex for lex in lexer]
         self.i = 0
-
-        self.functions = {}
-        self.environment = {}
 
     def get_next(self) -> None:
         self.i += 1
@@ -284,7 +281,7 @@ class Parser:
 
     def parse_indexation(self) -> OperatorNode | ASTRoot:
 
-        operand = self.parse_primary()
+        operand = self.parse_unary_ellipsis()
         if not self.is_consumable(Lexemes.OPEN_SQUARE_BRACKET):
             return operand
 
@@ -296,6 +293,13 @@ class Parser:
             )
 
         return OperatorNode(operand.line, operand.pos, '$index', chain_of_args)
+
+    def parse_unary_ellipsis(self):
+        if self.is_consumable(Lexemes.OP_ELLIPSIS):
+            self.consume(Lexemes.OP_ELLIPSIS)
+            return EllipsisOperatorNode(self.line, self.pos, self.parse_primary())
+        else:
+            return self.parse_primary()
 
     def parse_primary(self) -> ASTRoot:
 
@@ -424,9 +428,28 @@ class Parser:
     #     self.consume(Lexemes.KEYWORD)
     #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
 
-    # def parse_class(self) -> WhileNode:
-    #     self.consume(Lexemes.KEYWORD)
-    #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
+    def parse_class(self) -> WhileNode:
+        """
+
+
+
+        func_1(a, b) := ...
+        func_2(a, b, c) := ...
+
+        func = func_1 or func_2
+        func(a, b) <=> func_
+
+        person := class (name, age, status) {
+            _ := function(name, age, status)
+        }
+
+        :return:
+        """
+        self.consume(Lexemes.KEYWORD)
+        self.consume(Lexemes.OPEN_SCOPE)
+        self.consume(Lexemes.CLOSED_SCOPE)
+
+        return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
 
     def parse_function(self) -> FunctionDeclarationNode:
 

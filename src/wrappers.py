@@ -54,7 +54,7 @@ class AbstractTypeWrapper(ABC):
     @abstractmethod
     def __delitem__(self, key):
         pass
-    
+
     @abstractmethod
     def unwrap(self):
         pass
@@ -130,32 +130,6 @@ class NumericWrapper(AbstractTypeWrapper):
         if not isinstance(other, NumericWrapper):
             raise TypeError(f"unsupported operand type(s) for **: {type(self)} and {type(other)}")
         return NumericWrapper(pow(self.content, other.content, modulo))
-
-    # def __matmul__(self, other: AbstractTypeWrapper):
-    #
-    #     # res: atom <==> a: atom + b: atom
-    #     if not (self.type == other.type == WrapperTypes.LIST):
-    #         raise ValueError("Non-matrices multiplication is forbidden")
-    #
-    #     n = len(self.content)
-    #     k1 = len(self.content[0])
-    #     k2 = len(other.content)
-    #     m = max(map(len, other.content))
-    #
-    #     if k1 != k2:
-    #         raise ValueError(f"Incompatible dimensions for matrices: {n}x{k1} and {k2}x{m}")
-    #     k = k1
-    #
-    #     result = NumericWrapper(
-    #         [NumericWrapper([NumericWrapper(0) for _ in range(m)]) for _ in range(n)]
-    #     )
-    #
-    #     for i in range(n):
-    #         for j in range(m):
-    #             for t in range(k):
-    #                 result[i][j] += self[i][t] * other[t][j]
-    #
-    #     return result
 
     def __pos__(self):
         return NumericWrapper(+self.content)

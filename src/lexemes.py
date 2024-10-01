@@ -43,17 +43,17 @@ class Lexemes(IntEnum):
     OP_INDEX = auto()
     OP_COALESCE = auto()
 
+    OP_ATTRIBUTE_ACCESS = auto()
+    OP_ELLIPSIS = auto()
+    OP_IMPLICATION = auto()
+
     KEYWORD = auto()
     IDENTIFIER = auto()
     END_OF_FILE = auto()
 
-    # @staticmethod
-    # def name_of_token_type(token_type):
-    #     return Lexemes(token_type).name
-
     @staticmethod
     def identify_word(word: str):
-        if word in ('if', 'else', 'elif', 'while', 'function', 'promise'):
+        if word in ('if', 'else', 'elif', 'while', 'function', 'class', 'promise'):
             return Lexemes.KEYWORD
         elif word in ('and', 'or', 'not'):
             return Lexemes.OP_LOGICAL
