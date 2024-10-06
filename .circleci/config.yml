@@ -5,7 +5,7 @@ orbs:
 
 jobs:
   test:
-    executor: python/3.12
+    executor: python/default
     steps:
       - checkout
       - python/install-packages:
