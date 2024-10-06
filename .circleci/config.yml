@@ -8,12 +8,12 @@ jobs:
     executor: python/3.12
     steps:
       - checkout
-#      - python/install-packages:
-#          pkg-manager: pip
-#          pip-dependency-file: test-requirements.txt
-      - python/test:
+      - python/install-packages:
+          pkg-manager: pip
           pip-dependency-file: test-requirements.txt
-          test-tool: pytest
+      - run:
+          name: Run tests
+          command: python -m pytest
 
 
 workflows:
