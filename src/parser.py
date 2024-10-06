@@ -2,7 +2,7 @@ from .ast import (
     ASTRoot,
     IfElseNode, WhileNode, OperatorNode, ComparisonPolyOperatorNode, BooleanNode, NullNode,
     LeftAssociativePolyOperatorNode, UnaryOperatorNode, FunctionDeclarationNode, EllipsisOperatorNode,
-    NumberNode, ListNode, IdentifierNode, StringNode,
+    NumberNode, ListNode, IdentifierNode, StringNode, ClassDeclarationNode,
     ScopeNode
 )
 from .exceptions import DIStaticSyntaxError
@@ -81,10 +81,24 @@ class Parser:
         while self.is_consumable(Lexemes.END_LINE):
             self.consume(Lexemes.END_LINE)
 
-        value: ASTRoot = self.parse_logical_or()
+        value: ASTRoot = self.parse_assignment()
         while self.is_consumable(Lexemes.END_LINE):
             self.consume(Lexemes.END_LINE)
         return value
+
+    def parse_assignment(self) -> OperatorNode | ASTRoot:
+
+        operand = self.parse_logical_or()
+        if not self.is_consumable(Lexemes.OP_ASSIGN):
+            return operand
+
+        operands = [operand]
+
+        while self.is_consumable(Lexemes.OP_ASSIGN):
+            self.consume(Lexemes.OP_ASSIGN)
+            operands.append(self.parse_logical_or())
+
+        return OperatorNode(operand.line, operand.pos, ':=', operands, 'right')
 
     def parse_logical_or(self) -> OperatorNode | ASTRoot:
 
@@ -120,7 +134,7 @@ class Parser:
 
     def parse_comparison(self) -> LeftAssociativePolyOperatorNode | ASTRoot:
 
-        operand = self.parse_assignment()
+        operand = self.parse_bitwise_or()
         if not self.is_consumable(Lexemes.OP_COMPARISON):
             return operand
 
@@ -129,23 +143,9 @@ class Parser:
 
         while self.is_consumable(Lexemes.OP_COMPARISON):
             operators.append(self.consume(Lexemes.OP_COMPARISON))
-            operands.append(self.parse_assignment())
-
-        return ComparisonPolyOperatorNode(operand.line, operand.pos, operators, operands)
-
-    def parse_assignment(self) -> OperatorNode | ASTRoot:
-
-        operand = self.parse_bitwise_or()
-        if not self.is_consumable(Lexemes.OP_ASSIGN):
-            return operand
-
-        operands = [operand]
-
-        while self.is_consumable(Lexemes.OP_ASSIGN):
-            self.consume(Lexemes.OP_ASSIGN)
             operands.append(self.parse_bitwise_or())
 
-        return OperatorNode(operand.line, operand.pos, ':=', operands, 'right')
+        return ComparisonPolyOperatorNode(operand.line, operand.pos, operators, operands)
 
     def parse_bitwise_or(self) -> OperatorNode | ASTRoot:
 
@@ -281,7 +281,7 @@ class Parser:
 
     def parse_indexation(self) -> OperatorNode | ASTRoot:
 
-        operand = self.parse_unary_ellipsis()
+        operand = self.parse_member_access()
         if not self.is_consumable(Lexemes.OPEN_SQUARE_BRACKET):
             return operand
 
@@ -293,6 +293,27 @@ class Parser:
             )
 
         return OperatorNode(operand.line, operand.pos, '$index', chain_of_args)
+
+    def parse_member_access(self) -> OperatorNode | ASTRoot:
+
+        operand = self.parse_unary_ellipsis()
+        if not self.is_consumable(Lexemes.OP_ATTRIBUTE_ACCESS):
+            return operand
+
+        chain_of_args = [operand]
+
+        line, pos = None, None
+        while self.is_consumable(Lexemes.OP_ATTRIBUTE_ACCESS):
+            self.consume(Lexemes.OP_ATTRIBUTE_ACCESS)
+            line, pos = self.line, self.pos
+
+            member = IdentifierNode(
+                name=self.consume(Lexemes.IDENTIFIER),
+                line=self.line, pos=self.pos
+            )
+            chain_of_args.append(member)
+
+        return OperatorNode(line, pos, '$attr', chain_of_args)
 
     def parse_unary_ellipsis(self):
         if self.is_consumable(Lexemes.OP_ELLIPSIS):
@@ -362,8 +383,8 @@ class Parser:
         elif self.is_consumable(Lexemes.KEYWORD, 'function'):
             sub_result = self.parse_function()
 
-        # elif self.is_consumable(Lexemes.KEYWORD, 'class'):
-        #     sub_result = self.parse_class()
+        elif self.is_consumable(Lexemes.KEYWORD, 'class'):
+            sub_result = self.parse_class()
 
         else:
             self.error(f"Invalid terminal type: {self.curr_token[0].name}")
@@ -428,10 +449,8 @@ class Parser:
     #     self.consume(Lexemes.KEYWORD)
     #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
 
-    def parse_class(self) -> WhileNode:
+    def parse_class(self) -> ClassDeclarationNode:
         """
-
-
 
         func_1(a, b) := ...
         func_2(a, b, c) := ...
@@ -439,17 +458,35 @@ class Parser:
         func = func_1 or func_2
         func(a, b) <=> func_
 
-        person := class (name, age, status) {
-            _ := function(name, age, status)
+        person := class (_name, _age, _status) {
+            name := _name;
+            age := _age;
+            status := _status;
+
+            get_year_of_birth := function() 2024 - age;
         }
 
         :return:
         """
-        self.consume(Lexemes.KEYWORD)
-        self.consume(Lexemes.OPEN_SCOPE)
-        self.consume(Lexemes.CLOSED_SCOPE)
 
-        return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
+        params = []
+        self.consume(Lexemes.KEYWORD)
+        self.consume(Lexemes.OPEN_BRACKET)
+        while not self.is_consumable(Lexemes.CLOSED_BRACKET):
+            params.append(
+                IdentifierNode(
+                    name=self.consume(Lexemes.IDENTIFIER),
+                    line=self.line, pos=self.pos  # Intentional code design: firstly consume, then get location
+                )
+            )
+            if self.is_consumable(Lexemes.CLOSED_BRACKET):
+                break
+
+            _ = self.consume(Lexemes.COMMA)
+            while self.is_consumable(Lexemes.END_LINE):
+                self.consume(Lexemes.END_LINE)
+        self.consume(Lexemes.CLOSED_BRACKET)
+        return ClassDeclarationNode(self.line, self.pos, params, self.parse_scope())
 
     def parse_function(self) -> FunctionDeclarationNode:
 

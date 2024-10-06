@@ -390,14 +390,14 @@ class Lexer:
         # escaped backslash
         escaped_backslash = False
 
-        while k < len(self.text) and (escaped_backslash or self.curr_char != '"') and self.curr_char != '\n':
-            if self.curr_char == '\\':
+        while k < len(self.text) and (escaped_backslash or self.text[k] != '"') and self.text[k] != '\n':
+            if self.text[k] == '\\':
                 escaped_backslash = not escaped_backslash
-            if escaped_backslash and self.curr_char != '\\':
+            if escaped_backslash and self.text[k] != '\\':
                 escaped_backslash = False
             k += 1
         else:
-            if self.curr_char != '"' or escaped_backslash:
+            if self.text[k] != '"' or escaped_backslash:
                 self.error()
             # skip last quotation mark
             k += 1

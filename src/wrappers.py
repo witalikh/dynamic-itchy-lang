@@ -1,10 +1,3 @@
-# """
-# Because this language is too dynamic, and right now
-# I'm too lazy to even bother about infinite cases of operators behaviour,
-# for sake of simplicity, and sacrificing with extra computational resources,
-# I made a 'common type' that combines all types into one.
-# """
-
 from abc import ABC, abstractmethod
 
 
@@ -482,3 +475,79 @@ class StringWrapper(AbstractTypeWrapper):
 
     def apply(self, func, *args, **kwargs):
         return StringWrapper(func(self.content))
+
+
+class DictWrapper(AbstractTypeWrapper):
+
+    def __init__(self, literal: dict):
+        super().__init__(literal)
+
+    def __repr__(self):
+        return f'D[{',\n '.join([f'{repr(k)}: {repr(v)}' for k, v in self.content.items()])}]'
+
+    def unwrap(self):
+        return {k: v.unwrap() for k, v in self.content.items()}
+
+    def __bool__(self) -> bool:
+        return len(self.content) != 0
+
+    def __int__(self) -> int:
+        raise NotImplementedError
+
+    def __len__(self):
+        return len(self.content)
+
+    def __getitem__(self, item):
+        return self.content[item]
+
+    def __setitem__(self, key, value):
+        self.content[key] = value
+
+    def __delitem__(self, key):
+        del self.content[key]
+
+    def __iter__(self):
+        return iter(self.content)
+
+    def apply(self, func, *args, **kwargs):
+        return ListWrapper([a.apply(func, *args, **kwargs) for a in self.content])
+
+
+class FunctionWrapper(AbstractTypeWrapper):
+
+    def __init__(self, func_to_call):
+        super().__init__(None)
+        self.func = func_to_call
+
+    def __repr__(self):
+        return f'W({self.content})'
+
+    def unwrap(self):
+        return self.content
+
+    def __bool__(self) -> bool:
+        return self.content != 0
+
+    def __int__(self) -> int:
+        return int(self.content)
+
+    def __len__(self):
+        raise TypeError(f'numeric object ({self}) has no len')
+
+    def __iter__(self):
+        raise TypeError(f'numeric object ({self}) is not iterable')
+
+    def __getitem__(self, item):
+        raise TypeError(f'numeric object ({self}) is not subscriptable')
+
+    def __setitem__(self, key, value):
+        raise TypeError(f'numeric object ({self}) does not support item assignment')
+
+    def __delitem__(self, key):
+        raise TypeError(f'numeric object ({self}) does not support item deletion')
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+    def apply(self, func, *args, **kwargs):
+        return NumericWrapper(func(self.content, *args, **kwargs))

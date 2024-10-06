@@ -6,7 +6,7 @@ from src.exceptions import (
     DIRuntimeSyntaxError, DITypeError, DIZeroDivisionError,
     DINameError, DIValueError, DIIndexError
 )
-from src.wrappers import NumericWrapper, ListWrapper, StringWrapper
+from src.wrappers import NumericWrapper, ListWrapper, StringWrapper, DictWrapper, FunctionWrapper
 
 
 class ASTRoot(ABC):
@@ -75,17 +75,18 @@ class ScopeNode(ASTRoot):
         super().__init__(line, pos)
         self.instructions = []
 
-    def evaluate(self, environment: dict):
+    def evaluate(self, environment: dict, flush_variables: bool = True):
         old_environment = set(environment.keys())
 
         last = NumericWrapper(None)
         for instruction in self.instructions:
             last = instruction.evaluate(environment)
 
-        redundant_variables = set(environment.keys())
-        redundant_variables.difference_update(old_environment)
-        for variable_to_delete in redundant_variables:
-            environment.pop(variable_to_delete, None)
+        if flush_variables:
+            redundant_variables = set(environment.keys())
+            redundant_variables.difference_update(old_environment)
+            for variable_to_delete in redundant_variables:
+                environment.pop(variable_to_delete, None)
 
         return last
 
@@ -134,78 +135,119 @@ class OperatorNode(ASTRoot):
         self.operands = operands or []
         self.associativity: Literal['left', 'right', 'no'] = associativity or 'left'
 
-    def evaluate(self, environment: dict, except_last=False):
-        if self.operator == 'or':
-            for operand in self.operands[:-1]:
-                result = operand.evaluate(environment)
-                if result:
-                    return result
-            return self.operands[-1].evaluate(environment)
-        elif self.operator == 'and':
-            for operand in self.operands:
-                result = operand.evaluate(environment)
-                if not result:
-                    return result
-            return self.operands[-1].evaluate(environment)
-        elif self.operator == ':=':
-            value = self.operands[-1].evaluate(environment)
-            for identifier in reversed(self.operands[:-1]):
-                if isinstance(identifier, IdentifierNode):
-                    environment[identifier.name] = value
-                elif isinstance(identifier, OperatorNode):
-                    if identifier.operator != "$index":
-                        raise DIRuntimeSyntaxError(self.line, self.pos, "cannot assign to function call")
+    def _evaluate_or(self, environment: dict):
+        for operand in self.operands[:-1]:
+            result = operand.evaluate(environment)
+            if result:
+                return result
+        return self.operands[-1].evaluate(environment)
 
-                    inner_value = identifier.operands[0].evaluate(environment)
-                    try:
-                        for sub_operand in chain.from_iterable(identifier.operands[1:-1]):
-                            inner_value = inner_value[sub_operand.evaluate(environment)]
-                    except IndexError as e:
-                        raise DIIndexError(self.line, self.pos, str(e))
+    def _evaluate_and(self, environment: dict):
+        for operand in self.operands:
+            result = operand.evaluate(environment)
+            if not result:
+                return result
+        return self.operands[-1].evaluate(environment)
 
-                    for sub_operand in identifier.operands[-1][:-1]:
-                        inner_value = inner_value[sub_operand.evaluate(environment)]
-                    inner_value[identifier.operands[-1][-1].evaluate(environment)] = value
+    def _evaluate_assignment(self, environment: dict):
+        value = self.operands[-1].evaluate(environment)
+        for identifier in reversed(self.operands[:-1]):
+            if isinstance(identifier, IdentifierNode):
+                environment[identifier.name] = value
+            elif isinstance(identifier, OperatorNode):
+                if identifier.operator not in ("$index", "$attr"):
+                    raise DIRuntimeSyntaxError(self.line, self.pos, "cannot assign to this expression")
+
+                inner_value = identifier.operands[0].evaluate(environment)
+                if identifier.operator == "$index":
+                    sub_operand_chain = chain.from_iterable(
+                        (chain.from_iterable(identifier.operands[1:-1]), identifier.operands[-1][:-1])
+                    )
+                    last_sub_operand = identifier.operands[-1][-1]
                 else:
-                    raise DIRuntimeSyntaxError(self.line, self.pos, f"cannot assign to expression here: {identifier}")
-            return value
-        elif self.operator == '**':
-            value = self.operands[-1].evaluate(environment)
-            for operand in reversed(self.operands[:-1]):
-                value = operand.evaluate(environment) ** value
-            return value
-        elif self.operator == '^':
-            value = self.operands[0].evaluate(environment)
-            for operand in self.operands[1:]:
-                value = value ^ operand.evaluate(environment)
-            return value
-        elif self.operator == '&':
-            value = self.operands[0].evaluate(environment)
-            for operand in self.operands[1:]:
-                value = value & operand.evaluate(environment)
-            return value
-        elif self.operator == '|':
-            value = self.operands[0].evaluate(environment)
-            for operand in self.operands[1:]:
-                value = value | operand.evaluate(environment)
-            return value
+                    sub_operand_chain = identifier.operands[1:-1]
+                    last_sub_operand = identifier.operands[-1]
 
-        elif self.operator == '$func':
-            value = self.operands[0].evaluate(environment)
-            for operand in self.operands[1:]:
-                if not callable(value):
-                    raise DITypeError(self.line, self.pos, f'Not a function: {value}')
-                value = value([o.evaluate(environment) for o in operand])
-            return value
+                try:
+                    if identifier.operator == "$index":
+                        for sub_operand in sub_operand_chain:
+                            inner_value = inner_value[sub_operand.evaluate(environment)]
+                        inner_value[last_sub_operand.evaluate(environment)] = value
+                    else:
+                        for sub_operand in sub_operand_chain:
+                            inner_value = inner_value[sub_operand.name]
 
-        elif self.operator == '$index':
-            value = self.operands[0].evaluate(environment)
-            try:
-                for sub_operand in chain.from_iterable(self.operands[1:]):
-                    value = value[sub_operand.evaluate(environment)]
-            except IndexError as e:
-                raise DIIndexError(self.line, self.pos, str(e))
-            return value
+                        inner_value[last_sub_operand.name] = value
+                except IndexError as e:
+                    raise DIIndexError(self.line, self.pos, str(e))
+
+            else:
+                raise DIRuntimeSyntaxError(self.line, self.pos, f"cannot assign to expression here: {identifier}")
+        return value
+
+    def _evaluate_power(self, environment: dict):
+        value = self.operands[-1].evaluate(environment)
+        for operand in reversed(self.operands[:-1]):
+            value = operand.evaluate(environment) ** value
+        return value
+
+    def _evaluate_bitwise_xor(self, environment: dict):
+        value = self.operands[0].evaluate(environment)
+        for operand in self.operands[1:]:
+            value = value ^ operand.evaluate(environment)
+        return value
+
+    def _evaluate_bitwise_and(self, environment: dict):
+        value = self.operands[0].evaluate(environment)
+        for operand in self.operands[1:]:
+            value = value & operand.evaluate(environment)
+        return value
+
+    def _evaluate_bitwise_or(self, environment: dict):
+        value = self.operands[0].evaluate(environment)
+        for operand in self.operands[1:]:
+            value = value | operand.evaluate(environment)
+        return value
+
+    def _evaluate_func_call(self, environment: dict):
+        value = self.operands[0].evaluate(environment)
+        for operand in self.operands[1:]:
+            if not callable(value):
+                raise DITypeError(self.line, self.pos, f'Not a function: {value}')
+            value = value([o.evaluate(environment) for o in operand])
+        return value
+
+    def _evaluate_indexation(self, environment: dict):
+        value = self.operands[0].evaluate(environment)
+        try:
+            for sub_operand in chain.from_iterable(self.operands[1:]):
+                value = value[sub_operand.evaluate(environment)]
+        except IndexError as e:
+            raise DIIndexError(self.line, self.pos, str(e))
+        return value
+
+    def _evaluate_attribute_access(self, environment: dict):
+        print(self.operands)
+        value = self.operands[0].evaluate(environment)
+        try:
+            for sub_operand in self.operands[1:]:
+                value = value[sub_operand.name]
+        except IndexError as e:
+            raise DIIndexError(self.line, self.pos, str(e))
+        return value
+
+    def evaluate(self, environment: dict):
+        match self.operator:
+            case 'or': return self._evaluate_or(environment)
+            case 'and': return self._evaluate_and(environment)
+            case ':=': return self._evaluate_assignment(environment)
+            case '**': return self._evaluate_power(environment)
+            case '^': return self._evaluate_bitwise_xor(environment)
+            case '&': return self._evaluate_bitwise_and(environment)
+            case '|': return self._evaluate_bitwise_or(environment)
+            case '$func': return self._evaluate_func_call(environment)
+            case '$index': return self._evaluate_indexation(environment)
+            case '$attr': return self._evaluate_attribute_access(environment)
 
 
 class ComparisonPolyOperatorNode(ASTRoot):
@@ -318,6 +360,7 @@ class FunctionDeclarationNode(ASTRoot):
         super().__init__(line, pos)
         self.params = params
         self.body = scope
+        self.parent_scope = None
 
     def __repr__(self):
         return self.node_type() + f'(params count: {len(self.params)})'
@@ -328,9 +371,27 @@ class FunctionDeclarationNode(ASTRoot):
 
             for (param, arg) in zip(self.params, params, strict=True):
                 environment_copy[param.name] = arg
-            # print(environment_copy)
             return self.body.evaluate(environment_copy)
-        return func
+        return FunctionWrapper(func)
+
+
+class ClassDeclarationNode(ASTRoot):
+    def __init__(self, line: int, pos: int, params: list["IdentifierNode"], scope: ScopeNode):
+        super().__init__(line, pos)
+        self.params = params
+        self.body = scope
+
+    def __repr__(self):
+        return self.node_type() + f'(params count: {len(self.params)})'
+
+    def evaluate(self, environment: dict):
+        def func(params):
+            env = environment.copy()
+            for (param, arg) in zip(self.params, params, strict=True):
+                env[param.name] = arg
+            self.body.evaluate(env, False)
+            return DictWrapper(env)
+        return FunctionWrapper(func)
 
 
 class EllipsisOperatorNode(ASTRoot):
