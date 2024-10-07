@@ -4,7 +4,6 @@ Lexical analysis of source code
 
 from .lexemes import Lexemes
 from .exceptions import DIStaticSyntaxError
-from drafts.aliases import Result
 
 
 from typing import NoReturn, Tuple, Self
@@ -91,7 +90,7 @@ class Lexer:
     def __iter__(self) -> Self:
         return self
 
-    def __next__(self) -> Tuple[Lexemes, Result, int, int] | None:
+    def __next__(self):
 
         self.skip_comments_and_whitespace()
 
@@ -163,7 +162,7 @@ class Lexer:
         pos = (self.line, self.char)
         return *token, *pos
 
-    def lex_number(self) -> Tuple[Lexemes, Result] | NoReturn:
+    def lex_number(self):
 
         right_pos = self.i
 
