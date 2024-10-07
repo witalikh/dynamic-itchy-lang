@@ -3,9 +3,15 @@ version: 2.1
 orbs:
   python: circleci/python@2.1.1
 
+executors:
+  python-312:
+    docker:
+      - image: cimg/python:3.12
+
 jobs:
   test:
-    executor: python/default
+    executor: python-312
+
     steps:
       - checkout
       - python/install-packages:
