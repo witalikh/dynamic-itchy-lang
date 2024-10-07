@@ -250,7 +250,14 @@ class Parser:
     def parse_unary(self) -> UnaryOperatorNode | ASTRoot:
         if self.is_consumable(Lexemes.OP_ADDITIVE):
             op = self.consume(Lexemes.OP_ADDITIVE)
-            return UnaryOperatorNode(self.line, self.pos, op, self.parse_function_call())
+            return UnaryOperatorNode(self.line, self.pos, op, self.parse_unary_ellipsis())
+        else:
+            return self.parse_unary_ellipsis()
+
+    def parse_unary_ellipsis(self):
+        if self.is_consumable(Lexemes.OP_ELLIPSIS):
+            self.consume(Lexemes.OP_ELLIPSIS)
+            return EllipsisOperatorNode(self.line, self.pos, self.parse_function_call())
         else:
             return self.parse_function_call()
 
@@ -296,7 +303,7 @@ class Parser:
 
     def parse_member_access(self) -> OperatorNode | ASTRoot:
 
-        operand = self.parse_unary_ellipsis()
+        operand = self.parse_primary()
         if not self.is_consumable(Lexemes.OP_ATTRIBUTE_ACCESS):
             return operand
 
@@ -314,13 +321,6 @@ class Parser:
             chain_of_args.append(member)
 
         return OperatorNode(line, pos, '$attr', chain_of_args)
-
-    def parse_unary_ellipsis(self):
-        if self.is_consumable(Lexemes.OP_ELLIPSIS):
-            self.consume(Lexemes.OP_ELLIPSIS)
-            return EllipsisOperatorNode(self.line, self.pos, self.parse_primary())
-        else:
-            return self.parse_primary()
 
     def parse_primary(self) -> ASTRoot:
 

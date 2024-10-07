@@ -1,10 +1,9 @@
-from src.interpreter import MiniInterpreter
-
 import pytest
 import math
 
+from src.interpreter import MiniInterpreter
 
-class TestInterpreterClass:
+class TestFunctions:
 
     interpreter = MiniInterpreter()
 

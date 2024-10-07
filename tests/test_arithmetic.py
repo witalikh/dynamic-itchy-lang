@@ -1,8 +1,9 @@
-from src.interpreter import MiniInterpreter
 import pytest
 
+from src.interpreter import MiniInterpreter
 
-class TestInterpreterClass:
+
+class TestArithmetic:
 
     interpreter = MiniInterpreter()
 
@@ -23,11 +24,11 @@ class TestInterpreterClass:
     def test_subtraction(self):
         formulae_and_expected = [
             ("3 - 2", 1),
-            ("7 - 4 - 2", 13),
-            ("-1 + -2 + 3", 0),
-            ("0.25 + 0.33", 0.25 + 0.33),
-            ("0b1001011 + 0b10001", 0b1011100),
-            ("1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1", 10),
+            ("7 - 4 - 2", 1),
+            ("4 - 11", -7),
+            ("0.25 - 0.33", 0.25 - 0.33),
+            ("0b1001011 - 0b10001", 0b0111010),
+            ("1 - 1 + -1 - +1 + 1 - (1 + 1) - 1 + 1 - 1", -4),
         ]
         for idx, (formula, expected) in enumerate(formulae_and_expected):
             actual_value = self.interpreter.execute(formula)

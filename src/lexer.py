@@ -400,7 +400,9 @@ class Lexer:
                 self.error()
             # skip last quotation mark
             k += 1
-        name = self.text[self.i:k]
+
+        # omit quotes
+        string = self.text[self.i+1:k-1]
 
         self.pass_forward(k - self.i)
-        return Lexemes.STRING, name
+        return Lexemes.STRING, string
