@@ -33,6 +33,10 @@ class DITypeError(DIBaseException):
     pass
 
 
+class DIFunctionArgsCountError(DIBaseException):
+    pass
+
+
 class DIValueError(DIBaseException):
     pass
 

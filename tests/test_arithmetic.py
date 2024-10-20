@@ -34,6 +34,14 @@ class TestArithmetic:
             actual_value = self.interpreter.execute(formula)
             assert actual_value == expected, f"test #{idx} failed"
 
+    def test_len_operator_on_list(self):
+        formulae_and_expected = [
+            ("a := [1, 2, 3, 4, 5, 5, 6, 7]; #a", 8),
+        ]
+        for idx, (formula, expected) in enumerate(formulae_and_expected):
+            actual_value = self.interpreter.execute(formula)
+            assert actual_value == expected, f"test #{idx} failed"
+
     def test_operator_precedence(self):
         formulae_and_expected = [
             ("2 + 2 * 2", 6),

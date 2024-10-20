@@ -1,8 +1,8 @@
 from .ast import (
     ASTRoot,
-    IfElseNode, WhileNode, OperatorNode, ComparisonPolyOperatorNode, BooleanNode, NullNode,
-    LeftAssociativePolyOperatorNode, UnaryOperatorNode, FunctionDeclarationNode, EllipsisOperatorNode,
-    NumberNode, ListNode, IdentifierNode, StringNode, ClassDeclarationNode,
+    IfElseNode, WhileNode, OperatorNode, ComparisonNode, BooleanNode, NullNode,
+    LeftPolyOperatorNode, UnaryOperatorNode, FunctionDeclarationNode, EllipsisOperatorNode,
+    NumberNode, ListNode, IdentifierNode, StringNode, ClassDeclarationNode, AssignmentNode,
     ScopeNode
 )
 from .exceptions import DIStaticSyntaxError
@@ -66,7 +66,7 @@ class Parser:
     def pos(self):
         return self.prev_token[3] if self.prev_token else -1
 
-    def parse_program(self) -> ASTRoot:
+    def parse_program(self) -> ScopeNode:
         scope_node = ScopeNode(0, 0)
 
         while not self.is_consumable(Lexemes.END_OF_FILE):
@@ -86,6 +86,17 @@ class Parser:
             self.consume(Lexemes.END_LINE)
         return value
 
+    # def parse_comma(self) -> ASTRoot:
+    #     expr = self.parse_assignment()
+    #     if not self.is_consumable(Lexemes.COMMA):
+    #         return expr
+    #
+    #     tup = [expr]
+    #     while self.is_consumable(Lexemes.COMMA):
+    #         self.consume(Lexemes.COMMA)
+    #         tup.append(self.parse_assignment())
+    #     return ListNode(self.line, self.pos, tup)
+
     def parse_assignment(self) -> OperatorNode | ASTRoot:
 
         operand = self.parse_logical_or()
@@ -93,12 +104,13 @@ class Parser:
             return operand
 
         operands = [operand]
+        lasts = []
 
         while self.is_consumable(Lexemes.OP_ASSIGN):
-            self.consume(Lexemes.OP_ASSIGN)
+            lasts.append(self.consume(Lexemes.OP_ASSIGN) == '=:')
             operands.append(self.parse_logical_or())
 
-        return OperatorNode(operand.line, operand.pos, ':=', operands, 'right')
+        return AssignmentNode(operand.line, operand.pos, operands, lasts)
 
     def parse_logical_or(self) -> OperatorNode | ASTRoot:
 
@@ -110,7 +122,7 @@ class Parser:
         while self.is_consumable(Lexemes.OP_LOGICAL, 'or'):
             self.consume(Lexemes.OP_LOGICAL)
             operands.append(self.parse_logical_and())
-        return OperatorNode(left_expr.line, left_expr.pos, 'or', operands, 'no')
+        return OperatorNode(left_expr.line, left_expr.pos, 'or', operands)
 
     def parse_logical_and(self) -> OperatorNode | ASTRoot:
         left_expr = self.parse_logical_not()
@@ -122,7 +134,7 @@ class Parser:
             self.consume(Lexemes.OP_LOGICAL)
             operands.append(self.parse_logical_not())
 
-        return OperatorNode(left_expr.line, left_expr.pos, 'and', operands, 'no')
+        return OperatorNode(left_expr.line, left_expr.pos, 'and', operands)
 
     def parse_logical_not(self) -> UnaryOperatorNode | ASTRoot:
         if self.is_consumable(Lexemes.OP_LOGICAL, 'not'):
@@ -132,7 +144,7 @@ class Parser:
         else:
             return self.parse_comparison()
 
-    def parse_comparison(self) -> LeftAssociativePolyOperatorNode | ASTRoot:
+    def parse_comparison(self) -> LeftPolyOperatorNode | ASTRoot:
 
         operand = self.parse_bitwise_or()
         if not self.is_consumable(Lexemes.OP_COMPARISON):
@@ -145,7 +157,7 @@ class Parser:
             operators.append(self.consume(Lexemes.OP_COMPARISON))
             operands.append(self.parse_bitwise_or())
 
-        return ComparisonPolyOperatorNode(operand.line, operand.pos, operators, operands)
+        return ComparisonNode(operand.line, operand.pos, operators, operands)
 
     def parse_bitwise_or(self) -> OperatorNode | ASTRoot:
 
@@ -159,7 +171,7 @@ class Parser:
             self.consume(Lexemes.OP_BITWISE_OR)
             operands.append(self.parse_bitwise_xor())
 
-        return OperatorNode(operand.line, operand.pos, '|', operands, 'right')
+        return OperatorNode(operand.line, operand.pos, '|', operands)
 
     def parse_bitwise_xor(self) -> OperatorNode | ASTRoot:
 
@@ -173,7 +185,7 @@ class Parser:
             self.consume(Lexemes.OP_BITWISE_XOR)
             operands.append(self.parse_bitwise_and())
 
-        return OperatorNode(operand.line, operand.pos, '^', operands, 'right')
+        return OperatorNode(operand.line, operand.pos, '^', operands)
 
     def parse_bitwise_and(self) -> OperatorNode | ASTRoot:
 
@@ -187,9 +199,9 @@ class Parser:
             self.consume(Lexemes.OP_BITWISE_AND)
             operands.append(self.parse_bitwise_shifts())
 
-        return OperatorNode(operand.line, operand.pos, '|', operands, 'right')
+        return OperatorNode(operand.line, operand.pos, '|', operands)
 
-    def parse_bitwise_shifts(self) -> LeftAssociativePolyOperatorNode | ASTRoot:
+    def parse_bitwise_shifts(self) -> LeftPolyOperatorNode | ASTRoot:
 
         operand = self.parse_additive()
         if not self.is_consumable(Lexemes.OP_BITWISE_SHIFT):
@@ -202,9 +214,9 @@ class Parser:
             operators.append(self.consume(Lexemes.OP_BITWISE_SHIFT))
             operands.append(self.parse_additive())
 
-        return LeftAssociativePolyOperatorNode(operand.line, operand.pos, operators, operands)
+        return LeftPolyOperatorNode(operand.line, operand.pos, operators, operands)
 
-    def parse_additive(self) -> LeftAssociativePolyOperatorNode | ASTRoot:
+    def parse_additive(self) -> LeftPolyOperatorNode | ASTRoot:
 
         operand = self.parse_multiplicative()
         if not self.is_consumable(Lexemes.OP_ADDITIVE):
@@ -217,9 +229,9 @@ class Parser:
             operators.append(self.consume(Lexemes.OP_ADDITIVE))
             operands.append(self.parse_multiplicative())
 
-        return LeftAssociativePolyOperatorNode(operand.line, operand.pos, operators, operands)
+        return LeftPolyOperatorNode(operand.line, operand.pos, operators, operands)
 
-    def parse_multiplicative(self) -> LeftAssociativePolyOperatorNode | ASTRoot:
+    def parse_multiplicative(self) -> LeftPolyOperatorNode | ASTRoot:
 
         operand = self.parse_power()
         if not self.is_consumable(Lexemes.OP_MULTIPLICATIVE):
@@ -232,7 +244,7 @@ class Parser:
             operators.append(self.consume(Lexemes.OP_MULTIPLICATIVE))
             operands.append(self.parse_power())
 
-        return LeftAssociativePolyOperatorNode(operand.line, operand.pos, operators, operands)
+        return LeftPolyOperatorNode(operand.line, operand.pos, operators, operands)
 
     def parse_power(self) -> OperatorNode | ASTRoot:
         operand = self.parse_unary()
@@ -245,17 +257,16 @@ class Parser:
             _ = self.consume(Lexemes.OP_POWER)
             operands.append(self.parse_unary())
 
-        return OperatorNode(operand.line, operand.pos, '**', operands, 'right')
+        return OperatorNode(operand.line, operand.pos, '**', operands)
 
     def parse_unary(self) -> UnaryOperatorNode | ASTRoot:
         if self.is_consumable(Lexemes.OP_ADDITIVE):
             op = self.consume(Lexemes.OP_ADDITIVE)
-            return UnaryOperatorNode(self.line, self.pos, op, self.parse_unary_ellipsis())
-        else:
-            return self.parse_unary_ellipsis()
-
-    def parse_unary_ellipsis(self):
-        if self.is_consumable(Lexemes.OP_ELLIPSIS):
+            return UnaryOperatorNode(self.line, self.pos, op, self.parse_function_call())
+        elif self.is_consumable(Lexemes.OP_INDEX):
+            op = self.consume(Lexemes.OP_INDEX)
+            return UnaryOperatorNode(self.line, self.pos, op, self.parse_function_call())
+        elif self.is_consumable(Lexemes.OP_ELLIPSIS):
             self.consume(Lexemes.OP_ELLIPSIS)
             return EllipsisOperatorNode(self.line, self.pos, self.parse_function_call())
         else:

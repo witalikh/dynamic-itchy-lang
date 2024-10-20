@@ -2,31 +2,33 @@
 
 Smaller, and tbh, more consistent.  
 This project is not only about interpreter and language 
+But rather about other stuff that happens in software engineering. So far here:
+ - pytest
+ - CircleCI
 
 ## Dynamic Itchy
 ### Short introduction
 0. Syntax. The snippet below 
 ```text
-# It is a single line comment.
-\* And this is a multiline comment.
+\* This is a multiline comment.
 All comments can be inline as well.
 
 By the way,
 The code snippet is about the sum of `n` first prime numbers.
 \*
 
-sum := 0; # Any assignment looks like this
-i := 0  # Semicolon is not required
-n := 10; # But it's better to write it when possible...
+sum := 0; \* Any assignment looks like this *\
+i := 0  \* Semicolon is not required *\
+n := 10; \* But it's better to write it when possible... *\
 
-# Functions are defined via assignment as well
+\* Functions are defined via assignment as well
 is_prime := function(number) {
     if (n <= 1) {
-        # the only statement in this scope is a 'false' value.
-        # this will be returned in case of satisfying current branch condition
+        \* the only statement in this scope is a 'false' value.
+         this will be returned in case of satisfying current branch condition *\
         false;
     }
-    elif (n == 2) true # if scope is one statement, it doesn't need braces
+    elif (n == 2) true \* if scope is one statement, it doesn't need braces *\
     elif (n % 2 == 0) false
     else {
         \* Use Eratosthenes' sift
@@ -40,14 +42,14 @@ is_prime := function(number) {
             if (n % divisor == 0) {
                 prime := false;
                 
-                # stop loop by directly violating the condition
+                \* stop loop by directly violating the condition *\
                 divisor := n;
             } else {
                 divisor := divisor + 2;
             }
         }
         
-        # return value
+        \* return value *\
         prime;
     }
 }
@@ -56,7 +58,7 @@ while (i <= n) {
     if (is_prime(i)) sum := sum + i
 }
 
-# output 'sum' as program final result
+\* output 'sum' as program final result \*
 sum
 ```
 ### Principles
@@ -78,3 +80,11 @@ Drawbacks: forget about `break`, `continue`, `return` and any other control-flow
 At least for now.  
 3. Never type-checked until actual calculation  
 Thus, if variable is already evaluated, no matter it placed it has value (see example above)
+
+### Operators
+Standard as in many C-like languages, but:  
+1. `#` is a length operator (lists, strings, etc)
+2. `...a` is unpacking list operator
+3. Assignments are `:=` and `=:`, the only difference is that last one returns old value   
+in moment of assignment before actual assignment
+4. 

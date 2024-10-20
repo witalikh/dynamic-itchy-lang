@@ -71,9 +71,9 @@ class Lexer:
                     self.pass_forward(2)
 
             # skip inline comments
-            elif self.curr_char == '#':
+            elif self.curr_char == self.next_char == '#':
 
-                self.pass_forward(1)
+                self.pass_forward(2)
                 while self.curr_char and self.curr_char != '\n':
                     self.pass_forward(1)
                 else:
@@ -345,9 +345,17 @@ class Lexer:
             self.pass_forward(2)
             return Lexemes.OP_ASSIGN, ':='
 
+        elif self.curr_char == "=" and self.next_char == ":":
+            self.pass_forward(2)
+            return Lexemes.OP_ASSIGN, '=:'
+
         elif self.curr_char == "=" and self.next_char == ">":
             self.pass_forward(2)
             return Lexemes.OP_IMPLICATION, "=>"
+
+        elif self.curr_char == "#":
+            self.pass_forward(1)
+            return Lexemes.OP_INDEX, '#'
 
         elif self.curr_char == ":":
             self.pass_forward(1)

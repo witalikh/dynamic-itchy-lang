@@ -3,6 +3,7 @@ import math
 
 from src.interpreter import MiniInterpreter
 
+
 class TestFunctions:
 
     interpreter = MiniInterpreter()
@@ -14,11 +15,11 @@ class TestFunctions:
         
         sin := function(x) {
             
-            # shift value to [0; PI]
+            ## shift value to [0; PI]
             while (x > PI) x := x - PI;
             while (x < 0) x := x + PI;
             
-            # reduce to [0; PI/2]
+            ## reduce to [0; PI/2]
             if (x > PI / 2) x := PI - x;
             
             sum := 0;
