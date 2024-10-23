@@ -52,13 +52,3 @@ class TestFunctionalParadigm:
 
         actual_value = self.interpreter.execute(code)
         assert actual_value == expected
-
-    # def test_sum2(self):
-    #     code = """
-    #         [a, b] := [1, 2]
-    #         a
-    #     """
-    #     expected = 1
-    #
-    #     actual_value = self.interpreter.execute(code)
-    #     assert actual_value == expected

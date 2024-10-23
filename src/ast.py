@@ -1,8 +1,6 @@
-import itertools
-
 
 from abc import ABC, abstractmethod
-from itertools import pairwise
+from itertools import chain, islice, pairwise
 from typing import Optional, List, Dict, LiteralString, Union, Iterator
 
 from src.exceptions import (
@@ -17,58 +15,11 @@ from src.wrappers import (
 
 class ASTRoot(ABC):
 
-    _MIDDLE_VAR: LiteralString = '├──'
-    _LAST_VAR: LiteralString = '└──'
-    _EMPTY: LiteralString = '    '
-    _GOING: LiteralString = '│   '
-
     def __init__(self, line: int, pos: int) -> None:
         self.line = line
         self.pos = pos
 
-    @classmethod
-    def print_tree(
-        cls,
-        tree: Union["ASTRoot", List["ASTRoot"]],
-        indent: str = "",
-        last: Optional[bool] = None,
-    ) -> str:
-        if not isinstance(tree, (ASTRoot, list)):
-            return str(tree) + "\n"
-
-        if last is not None:
-            indent += (cls._EMPTY if last else cls._GOING)
-
-        if isinstance(tree, list):
-
-            arg_num = len(tree)
-            result_string = "\n"
-            for index, item in enumerate(tree):
-                marker = cls._LAST_VAR if index == arg_num - 1 else cls._MIDDLE_VAR
-
-                substr = cls.print_tree(item, indent, index == arg_num - 1)
-                result_string += f"{indent}{marker}{substr}"
-
-            return result_string
-
-        res = tree.node_type() + '\n'
-
-        attrs = tree.__dict__.copy()
-        arg_num = len(attrs)
-        for index, (arg_name, arg_value) in enumerate(attrs.items()):
-            arg_name = arg_name.lstrip("_")
-            marker = cls._LAST_VAR if index == arg_num - 1 else cls._MIDDLE_VAR
-            substr = cls.print_tree(arg_value, indent, index == arg_num - 1)
-            res += f"{indent}{marker}{arg_name}: {substr}"
-        return res
-
-    def print(self) -> str:
-        return ASTRoot.print_tree(self)
-
     def __repr__(self) -> str:
-        return self.node_type()
-
-    def node_type(self) -> str:
         return type(self).__name__.replace("Node", "")
 
     @abstractmethod
@@ -141,9 +92,15 @@ class AssignmentNode(ASTRoot):
         self.chain_of_orders = orders or []
 
     @staticmethod
+    def cast_into_wrapper(value: Union[ASTRoot, AbstractTypeWrapper], environment: Dict):
+        if isinstance(value, ASTRoot):
+            return value.evaluate(environment)
+        return value
+
+    @staticmethod
     def perform_assignment(
             lhs: ASTRoot,
-            rhs: ASTRoot,
+            rhs: Union[ASTRoot, AbstractTypeWrapper],
             return_old: bool,
             environment: Dict
     ) -> AbstractTypeWrapper:
@@ -161,13 +118,16 @@ class AssignmentNode(ASTRoot):
     @staticmethod
     def assign_identifier(
             lhs: "IdentifierNode",
-            rhs: ASTRoot,
+            rhs: Union[ASTRoot, AbstractTypeWrapper],
             return_old: bool,
             environment: Dict
     ) -> AbstractTypeWrapper:
-        new_value = rhs.evaluate(environment)
+        if isinstance(rhs, str):
+            raise ZeroDivisionError
+
+        new_value = AssignmentNode.cast_into_wrapper(rhs, environment)
         if return_old:
-            old_value = environment[lhs.name]
+            old_value = environment.get(lhs.name, NumericWrapper(None))
             environment[lhs.name] = new_value
             return old_value
         else:
@@ -177,32 +137,68 @@ class AssignmentNode(ASTRoot):
     @staticmethod
     def assign_list(
             lhs: "ListNode",
-            rhs: ASTRoot,
+            rhs: Union[ASTRoot, AbstractTypeWrapper],
             return_old: bool,
-            environment: Dict
+            environment: Dict,
+
     ) -> AbstractTypeWrapper:
-        if not isinstance(rhs, (ListNode, ListWrapper)):
+        rhs_value = AssignmentNode.cast_into_wrapper(rhs, environment)
+        if not isinstance(rhs_value, (ListWrapper, StringWrapper)):
             raise DIRuntimeSyntaxError(
                 lhs.line, lhs.pos,
                 f"cannot unpack non-iterable {type(rhs)} object")
-        if len(lhs) < len(rhs):
-            # TODO: unpacking operator support
-            raise DIRuntimeSyntaxError(
-                lhs.line, lhs.pos,
-                f"too many values to unpack (expected {len(lhs)}, got {len(rhs)})")
-        if len(lhs) > len(rhs):
-            raise DIRuntimeSyntaxError(
-                lhs.line, lhs.pos,
-                f"not enough values to unpack (expected {len(lhs)}, got {len(rhs)})")
 
-        for i, v in zip(lhs, rhs, strict=True):
-            AssignmentNode.perform_assignment(i, v, return_old, environment)
-        return rhs
+        ellipses_count = 0
+        ellipsis_element = None
+        slice_of_rhs = None
+
+        for idx, x in enumerate(lhs):
+            if not isinstance(x, EllipsisOperatorNode):
+                continue
+            ellipses_count += 1
+            if ellipses_count > 1:
+                raise DIRuntimeSyntaxError(
+                    lhs.line, lhs.pos,
+                    f"too many unpacking expressions in assignment")
+            ellipsis_element = x.elements
+            if not isinstance(ellipsis_element, IdentifierNode):
+                pass
+            slice_of_rhs = slice(idx, idx + len(rhs_value) - len(lhs) + 1)
+
+        if (len(lhs) > len(rhs_value) and not ellipses_count) or len(lhs) > len(rhs_value) + 1:
+            raise DIRuntimeSyntaxError(
+                lhs.line, lhs.pos,
+                f"not enough values to unpack (expected {len(lhs)}, got {len(rhs_value)})")
+
+        if len(lhs) < len(rhs_value) and not ellipses_count:
+            raise DIRuntimeSyntaxError(
+                lhs.line, lhs.pos,
+                f"too many values to unpack (expected {len(lhs)}, got {len(rhs_value)})")
+
+        lhs_old_value = None
+        if return_old:
+            lhs_old_value = lhs.evaluate(environment)
+
+        if ellipses_count:
+            mono_lhs = chain(islice(lhs, 0, slice_of_rhs.start), islice(lhs, slice_of_rhs.start + 1, None))
+            mono_rhs = chain(islice(rhs_value, 0, slice_of_rhs.start), islice(rhs_value, slice_of_rhs.stop, None))
+
+            rhs_slice = rhs_value[slice_of_rhs]
+            AssignmentNode.perform_assignment(ellipsis_element, rhs_slice, return_old, environment)
+
+            for i, v in zip(mono_lhs, mono_rhs, strict=True):
+                AssignmentNode.perform_assignment(i, v, return_old, environment)
+        else:
+            for i, v in zip(lhs, rhs_value, strict=True):
+                AssignmentNode.perform_assignment(i, v, return_old, environment)
+        if return_old:
+            return lhs_old_value
+        return rhs_value
 
     @staticmethod
     def assign_indexation(
             lhs: "OperatorNode",
-            rhs: ASTRoot,
+            rhs: Union[ASTRoot, AbstractTypeWrapper],
             return_old: bool,
             environment: Dict
     ) -> AbstractTypeWrapper:
@@ -212,7 +208,7 @@ class AssignmentNode(ASTRoot):
         for i in intermediate:
             value = value[i.evaluate(environment)]
 
-        new_value = rhs.evaluate(environment)
+        new_value = AssignmentNode.cast_into_wrapper(rhs, environment)
         if return_old:
             old_value = value[last.evaluate(environment)]
             value[last.evaluate(environment)] = new_value
@@ -224,7 +220,7 @@ class AssignmentNode(ASTRoot):
     @staticmethod
     def assign_member(
             lhs: "OperatorNode",
-            rhs: ASTRoot,
+            rhs: Union[ASTRoot, AbstractTypeWrapper],
             return_old: bool,
             environment: Dict
     ) -> AbstractTypeWrapper:
@@ -234,9 +230,9 @@ class AssignmentNode(ASTRoot):
         for i in intermediate:
             value = value[i.name]
 
-        new_value = rhs.evaluate(environment)
+        new_value = AssignmentNode.cast_into_wrapper(rhs, environment)
         if return_old:
-            old_value = value[last.name]
+            old_value = value.get(last.name, NumericWrapper(None))
             value[last.name] = new_value
             return old_value
         else:
@@ -315,7 +311,7 @@ class OperatorNode(ASTRoot):
         primary, *indexers = self.operands
         value = primary.evaluate(environment)
         try:
-            for index in itertools.chain.from_iterable(indexers):
+            for index in chain.from_iterable(indexers):
                 value = value[index.evaluate(environment)]
         except IndexError as e:
             raise DIIndexError(self.line, self.pos, str(e))
@@ -458,7 +454,7 @@ class FunctionDeclarationNode(ASTRoot):
         self.parent_scope = None
 
     def __repr__(self) -> str:
-        return self.node_type() + f'(params count: {len(self.params)})'
+        return super(self).__repr__() + f'(params count: {len(self.params)})'
 
     def evaluate(self, environment: Dict) -> FunctionWrapper:
         def func(params):
@@ -482,7 +478,7 @@ class ClassDeclarationNode(ASTRoot):
         self.body = scope
 
     def __repr__(self) -> str:
-        return self.node_type() + f'(params count: {len(self.params)})'
+        return super(self).__repr__() + f'(params count: {len(self.params)})'
 
     def evaluate(self, environment: Dict) -> FunctionWrapper:
         def func(params):
@@ -576,7 +572,7 @@ class IdentifierNode(ASTRoot):
         self.name = name
 
     def __repr__(self) -> str:
-        return self.node_type() + f'({self.name})'
+        return super(self).__repr__() + f'({self.name})'
 
     def evaluate(self, environment: Dict) -> AbstractTypeWrapper:
         if self.name in environment:

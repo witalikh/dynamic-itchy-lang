@@ -29,10 +29,6 @@ class Lexer:
         )
 
     @property
-    def prev_char(self) -> str:
-        return self.text[self.i - 1] if 1 <= self.i < len(self.text) else None
-
-    @property
     def curr_char(self) -> str:
         return self.text[self.i] if self.i < len(self.text) else None
 

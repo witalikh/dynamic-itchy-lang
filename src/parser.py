@@ -86,20 +86,8 @@ class Parser:
             self.consume(Lexemes.END_LINE)
         return value
 
-    # def parse_comma(self) -> ASTRoot:
-    #     expr = self.parse_assignment()
-    #     if not self.is_consumable(Lexemes.COMMA):
-    #         return expr
-    #
-    #     tup = [expr]
-    #     while self.is_consumable(Lexemes.COMMA):
-    #         self.consume(Lexemes.COMMA)
-    #         tup.append(self.parse_assignment())
-    #     return ListNode(self.line, self.pos, tup)
-
     def parse_assignment(self) -> OperatorNode | ASTRoot:
-
-        operand = self.parse_logical_or()
+        operand = self.parse_coalesce()
         if not self.is_consumable(Lexemes.OP_ASSIGN):
             return operand
 
@@ -108,9 +96,20 @@ class Parser:
 
         while self.is_consumable(Lexemes.OP_ASSIGN):
             lasts.append(self.consume(Lexemes.OP_ASSIGN) == '=:')
-            operands.append(self.parse_logical_or())
+            operands.append(self.parse_coalesce())
 
         return AssignmentNode(operand.line, operand.pos, operands, lasts)
+
+    def parse_coalesce(self) -> OperatorNode | ASTRoot:
+        left_expr = self.parse_logical_or()
+        if not self.is_consumable(Lexemes.OP_COALESCE):
+            return left_expr
+
+        operands = [left_expr]
+        while self.is_consumable(Lexemes.OP_COALESCE):
+            self.consume(Lexemes.OP_COALESCE)
+            operands.append(self.parse_logical_or())
+        return OperatorNode(left_expr.line, left_expr.pos, '?', operands)
 
     def parse_logical_or(self) -> OperatorNode | ASTRoot:
 
@@ -455,10 +454,6 @@ class Parser:
     def parse_while(self) -> WhileNode:
         self.consume(Lexemes.KEYWORD)
         return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
-
-    # def parse_promise(self) -> WhileNode:
-    #     self.consume(Lexemes.KEYWORD)
-    #     return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
 
     def parse_class(self) -> ClassDeclarationNode:
         """

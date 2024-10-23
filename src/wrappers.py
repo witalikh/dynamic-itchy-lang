@@ -52,10 +52,6 @@ class AbstractTypeWrapper(ABC):
     def unwrap(self):
         pass
 
-    @abstractmethod
-    def apply(self, func, *args, **kwargs):
-        pass
-
 
 class NumericWrapper(AbstractTypeWrapper):
 
@@ -183,6 +179,9 @@ class ListWrapper(AbstractTypeWrapper):
         return len(self.content)
 
     def __getitem__(self, item):
+        if isinstance(item, slice):
+            return ListWrapper(self.content[item])
+
         if isinstance(item, NumericWrapper):
             item = item.content
 
@@ -363,9 +362,6 @@ class ListWrapper(AbstractTypeWrapper):
 
         return ListWrapper([a ^ b for a, b in zip(self.content, other.content)])
 
-    def apply(self, func, *args, **kwargs):
-        return ListWrapper([a.apply(func, *args, **kwargs) for a in self.content])
-
 
 class StringWrapper(AbstractTypeWrapper):
 
@@ -388,12 +384,15 @@ class StringWrapper(AbstractTypeWrapper):
         return len(self.content)
 
     def __getitem__(self, item):
+        if isinstance(item, slice):
+            return StringWrapper(self.content[item])
+
         if isinstance(item, NumericWrapper):
             item = item.content
 
         size = len(self.content)
         if -size <= item < size:
-            return self.content[item]
+            return StringWrapper(self.content[item])
 
         if size == 0:
             raise IndexError(
@@ -419,7 +418,15 @@ class StringWrapper(AbstractTypeWrapper):
         self.content = self.content[:key] + self.content[key + 1:]
 
     def __iter__(self):
-        return iter(self.content)
+        self.i = 0
+        return self
+
+    def __next__(self):
+        if self.i >= len(self.content):
+            raise StopIteration
+        val = StringWrapper(self.content[self.i])
+        self.i += 1
+        return val
 
     def __add__(self, other: AbstractTypeWrapper):
         if not isinstance(other, StringWrapper):
@@ -473,9 +480,6 @@ class StringWrapper(AbstractTypeWrapper):
     def __xor__(self, other: AbstractTypeWrapper):
         raise TypeError(f"unsupported operand type(s) for ^: {type(self)} and {type(other)}")
 
-    def apply(self, func, *args, **kwargs):
-        return StringWrapper(func(self.content))
-
 
 class DictWrapper(AbstractTypeWrapper):
 
@@ -508,9 +512,6 @@ class DictWrapper(AbstractTypeWrapper):
 
     def __iter__(self):
         return iter(self.content)
-
-    def apply(self, func, *args, **kwargs):
-        return ListWrapper([a.apply(func, *args, **kwargs) for a in self.content])
 
 
 class FunctionWrapper(AbstractTypeWrapper):
@@ -548,6 +549,3 @@ class FunctionWrapper(AbstractTypeWrapper):
 
     def __call__(self, *args, **kwargs):
         return self.func(*args, **kwargs)
-
-    def apply(self, func, *args, **kwargs):
-        return NumericWrapper(func(self.content, *args, **kwargs))
