@@ -22,13 +22,10 @@ class MiniInterpreter:
         try:
             parser = Parser(Lexer(src))
             tree = parser.parse_program()
-            wrapped_result = tree.evaluate(self.environment)
-            result = wrapped_result.unwrap()
+            return tree.evaluate(self.environment)
         # TEMP
         finally:
             pass
-
-        return result
 
 
 class Interpreter:
@@ -42,8 +39,7 @@ class Interpreter:
             lexer = Lexer(src)
             parser = Parser(lexer)
             tree = parser.parse_program()
-            wrapped_result = tree.evaluate(self.environment)
-            self.result = wrapped_result.unwrap()
+            self.result = tree.evaluate(self.environment)
         # TEMP
         finally:
             pass
