@@ -22,6 +22,8 @@ class MiniInterpreter:
         try:
             parser = Parser(Lexer(src))
             tree = parser.parse_program()
+            # from .printer import print_ast_tree
+            # print(print_ast_tree(tree))
             return tree.evaluate(self.environment)
         # TEMP
         finally:

@@ -26,6 +26,8 @@ class TestFunctionalParadigm:
             while ((i := i + 1) < #iter) result := func(result, iter[i]);
             result;
         }
+        
+        partial := function(func, ...a) function (...b) func(...a, ...b)
     """
     )
 
@@ -42,6 +44,25 @@ class TestFunctionalParadigm:
 
         actual_value = self.interpreter.execute(code)
         assert actual_value == expected
+
+    def test_partial(self):
+        code = """
+        
+        append := function (list, elem) [...list, elem]
+        
+        merge_sort := function(cmp, iter) {
+        
+            _merge := function(a, b) {
+                res = []
+                
+                
+            }
+            
+            
+        } 
+        
+        """
+
 
     def test_sum(self):
         code = """

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from itertools import chain, islice, pairwise
-from typing import Optional, List, Dict, LiteralString, Union, Iterator, Callable
+from typing import Optional, List, Dict, LiteralString, Union, Iterator, Callable, IO
 
 from src.exceptions import (
     DIRuntimeSyntaxError, DITypeError, DIZeroDivisionError,
@@ -26,14 +26,14 @@ class ASTRoot(ABC):
         pass
 
     @abstractmethod
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         pass
 
 
 class ScopeNode(ASTRoot):
     def __init__(self, line: int, pos: int) -> None:
         super().__init__(line, pos)
-        self.instructions = []
+        self.instructions: List[ASTRoot] = []
 
     def evaluate(self, environment: Dict, flush_variables: bool = True) -> TResult:
         old_environment = set(environment.keys())
@@ -50,9 +50,11 @@ class ScopeNode(ASTRoot):
 
         return last
 
-    def serialize(self, stdout) -> None:
-        # TODO: serialization
-        pass
+    def serialize(self, stdout: IO) -> None:
+        # TODO: prototype, do real serialization
+        for instruction in self.instructions:
+            instruction.serialize(stdout)
+            stdout.write('\n')
 
 
 class IfElseNode(ASTRoot):
@@ -78,7 +80,8 @@ class IfElseNode(ASTRoot):
 
         return None
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
+
         # TODO: serialization
         pass
 
@@ -95,7 +98,7 @@ class WhileNode(ASTRoot):
             result = self.scope.evaluate(environment)
         return result
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -148,16 +151,15 @@ class AssignmentNode(ASTRoot):
 
     @staticmethod
     def assign_list(
-            lhs: "ListNode",
-            rhs: Union[ASTRoot, TResult],
+            lhs: Union["ListNode", list[Union["IdentifierNode", "EllipsisOperatorNode"]]],
+            rhs: Union[ASTRoot, TResult, list[Union["IdentifierNode", "EllipsisOperatorNode"]]],
             return_old: bool,
             environment: Dict,
 
     ) -> TResult:
         rhs_value = AssignmentNode.evaluate_if_not(rhs, environment)
-        if not isinstance(rhs_value, (ListWrapper, str)):
-            raise DIRuntimeSyntaxError(
-                lhs.line, lhs.pos,
+        if not isinstance(rhs_value, (ListWrapper, str, list)):
+            raise ValueError(
                 f"cannot unpack non-iterable {type(rhs)} object")
 
         ellipses_count = 0
@@ -169,8 +171,7 @@ class AssignmentNode(ASTRoot):
                 continue
             ellipses_count += 1
             if ellipses_count > 1:
-                raise DIRuntimeSyntaxError(
-                    lhs.line, lhs.pos,
+                raise ValueError(
                     f"too many unpacking expressions in assignment")
             ellipsis_element = x.elements
             if not isinstance(ellipsis_element, IdentifierNode):
@@ -178,13 +179,11 @@ class AssignmentNode(ASTRoot):
             slice_of_rhs = slice(idx, idx + len(rhs_value) - len(lhs) + 1)
 
         if (len(lhs) > len(rhs_value) and not ellipses_count) or len(lhs) > len(rhs_value) + 1:
-            raise DIRuntimeSyntaxError(
-                lhs.line, lhs.pos,
+            raise ValueError(
                 f"not enough values to unpack (expected {len(lhs)}, got {len(rhs_value)})")
 
         if len(lhs) < len(rhs_value) and not ellipses_count:
-            raise DIRuntimeSyntaxError(
-                lhs.line, lhs.pos,
+            raise ValueError(
                 f"too many values to unpack (expected {len(lhs)}, got {len(rhs_value)})")
 
         lhs_old_value = None
@@ -262,7 +261,7 @@ class AssignmentNode(ASTRoot):
             raise DIIndexError(self.line, self.pos, str(e))
         return rhs
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -285,9 +284,16 @@ class OperatorNode(ASTRoot):
         return self.operands[-1].evaluate(environment)
 
     def evaluate_and(self, environment: Dict) -> TResult:
-        for operand in self.operands:
+        for operand in self.operands[:-1]:
             result = operand.evaluate(environment)
             if not result:
+                return result
+        return self.operands[-1].evaluate(environment)
+
+    def evaluate_coalesce(self, environment: Dict) -> TResult:
+        for operand in self.operands:
+            result = operand.evaluate(environment)
+            if result is not None:
                 return result
         return self.operands[-1].evaluate(environment)
 
@@ -316,12 +322,23 @@ class OperatorNode(ASTRoot):
         return value
 
     def evaluate_func_call(self, environment: Dict) -> TResult:
-        value = self.operands[0].evaluate(environment)
+        primary = self.operands[0]
+        func = primary.evaluate(environment)
+
+        is_method = False
+        obj = None
+        if isinstance(primary, OperatorNode) and primary.operator == "$attr":
+            is_method = True
+            obj = primary.operands[0].evaluate(environment)
+
         for operand in self.operands[1:]:
-            if not callable(value):
-                raise DITypeError(self.line, self.pos, f'Not a function: {value}')
-            value = value([o.evaluate(environment) for o in operand])
-        return value
+            if not callable(func):
+                raise DITypeError(self.line, self.pos, f'Not a function: {func}')
+            if is_method:
+                func = func([obj] + [o.evaluate(environment) for o in operand])
+            else:
+                func = func([o.evaluate(environment) for o in operand])
+        return func
 
     def evaluate_indexation(self, environment: Dict) -> TResult:
         primary, *indexers = self.operands
@@ -349,6 +366,8 @@ class OperatorNode(ASTRoot):
                 return self.evaluate_or(environment)
             case 'and':
                 return self.evaluate_and(environment)
+            case '?':
+                return self.evaluate_coalesce(environment)
             case '**':
                 return self.evaluate_power(environment)
             case '^':
@@ -364,7 +383,7 @@ class OperatorNode(ASTRoot):
             case '$attr':
                 return self.evaluate_member_access(environment)
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -401,7 +420,7 @@ class ComparisonNode(ASTRoot):
                 return False
         return True
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -457,7 +476,7 @@ class LeftPolyOperatorNode(ASTRoot):
             lhs = value
         return lhs
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -482,7 +501,7 @@ class UnaryOperatorNode(ASTRoot):
 
         raise NotImplemented
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -492,17 +511,15 @@ class FunctionDeclarationNode(ASTRoot):
         super().__init__(line, pos)
         self.params = params
         self.body = scope
-        self.parent_scope = None
 
     def __repr__(self) -> str:
-        return super(self).__repr__() + f'(params count: {len(self.params)})'
+        return super().__repr__() + f'(params count: {len(self.params)})'
 
     def evaluate(self, environment: Dict) -> Callable:
         def func(params):
             environment_copy = environment.copy()
             try:
-                for (param, arg) in zip(self.params, params, strict=True):
-                    environment_copy[param.name] = arg
+                AssignmentNode.assign_list(self.params, params, False, environment_copy)
                 return self.body.evaluate(environment_copy)
             except ValueError as e:
                 # TODO:
@@ -511,7 +528,7 @@ class FunctionDeclarationNode(ASTRoot):
 
         return func
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -523,7 +540,7 @@ class ClassDeclarationNode(ASTRoot):
         self.body = scope
 
     def __repr__(self) -> str:
-        return super(self).__repr__() + f'(params count: {len(self.params)})'
+        return super().__repr__() + f'(params count: {len(self.params)})'
 
     def evaluate(self, environment: Dict) -> Callable:
         def func(params):
@@ -535,22 +552,27 @@ class ClassDeclarationNode(ASTRoot):
 
         return func
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
 
 class EllipsisOperatorNode(ASTRoot):
-    def __init__(self, line: int, pos: int, list_value: "ListNode") -> None:
+    def __init__(self, line: int, pos: int, list_value: Union["ListNode", "IdentifierNode"]) -> None:
         super().__init__(line, pos)
         self.elements = list_value
+
+    def __repr__(self):
+        if isinstance(self.elements, IdentifierNode):
+            return super().__repr__() + f'({self.elements.name})'
+        return super().__repr__()
 
     def evaluate(self, environment: Dict, in_list: bool = False) -> ListWrapper:
         if in_list:
             return self.elements.evaluate(environment)
         raise DIRuntimeSyntaxError(self.line, self.pos, "Cannot use ellipsis here")
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -560,10 +582,13 @@ class NumberNode(ASTRoot):
         super().__init__(line, pos)
         self.number = number
 
+    def __repr__(self):
+        return super().__repr__() + f'({self.number})'
+
     def evaluate(self, environment: Dict):
         return self.number
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -578,10 +603,13 @@ class BooleanNode(ASTRoot):
         else:
             raise NotImplementedError
 
+    def __repr__(self):
+        return super().__repr__() + f'({self.value})'
+
     def evaluate(self, environment: Dict) -> bool:
         return self.value
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -593,7 +621,7 @@ class NullNode(ASTRoot):
     def evaluate(self, environment: Dict) -> None:
         return None
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -603,10 +631,13 @@ class StringNode(ASTRoot):
         super().__init__(line, pos)
         self.string = string
 
+    def __repr__(self):
+        return super().__repr__() + f'({self.string})'
+
     def evaluate(self, environment: Dict) -> str:
         return self.string
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -615,6 +646,9 @@ class ListNode(ASTRoot):
     def __init__(self, line: int, pos: int, elements: List[ASTRoot]) -> None:
         super().__init__(line, pos)
         self.elements = elements
+
+    def __repr__(self):
+        return super().__repr__() + f'[count: {len(self.elements)}]'
 
     def __iter__(self) -> Iterator[ASTRoot]:
         return iter(self.elements)
@@ -634,7 +668,7 @@ class ListNode(ASTRoot):
                 result.append(e.evaluate(environment))
         return ListWrapper(result)
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass
 
@@ -646,13 +680,13 @@ class IdentifierNode(ASTRoot):
         self.name = name
 
     def __repr__(self) -> str:
-        return super(self).__repr__() + f'({self.name})'
+        return super().__repr__() + f'({self.name})'
 
     def evaluate(self, environment: Dict) -> TResult:
         if self.name in environment:
             return environment[self.name]
         raise DINameError(self.line, self.pos, f"Variable {self.name} is not defined")
 
-    def serialize(self, stdout) -> None:
+    def serialize(self, stdout: IO) -> None:
         # TODO: serialization
         pass

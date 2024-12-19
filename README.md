@@ -3,7 +3,7 @@
 Smaller, and tbh, more consistent.  
 This project is not only about interpreter and language 
 But rather about other stuff that happens in software engineering. So far here:
- - pytest
+ - pytest + coverage
  - CircleCI
 
 ## Dynamic Itchy
@@ -79,7 +79,8 @@ sum
 Drawbacks: forget about `break`, `continue`, `return` and any other control-flow statement.  
 At least for now.  
 3. Never type-checked until actual calculation  
-Thus, if variable is already evaluated, no matter it placed it has value (see example above)
+Thus, if variable is already evaluated, no matter it placed it has value (see example above)  
+Update: at least in Python AST-interpreter version and other future interpreter declared dynamic it will so
 
 ### Operators
 Standard as in many C-like languages, but:  
@@ -87,4 +88,41 @@ Standard as in many C-like languages, but:
 2. `...a` is unpacking list operator
 3. Assignments are `:=` and `=:`, the only difference is that last one returns old value   
 in moment of assignment before actual assignment
-4. 
+4. `and`, `or`, and `?` (coalesce) operators are just `first false else last`, `first true else last` and
+`first not-null else last` operators
+
+Full list of operators (at least for now), sorted by precedence:
+
+| #  | Group                   | Op   | A    | Description                          | Note: |
+|----|-------------------------|------|------|--------------------------------------|-------|
+| -1 | Comma                   | ,    | ->   |                                      |       |
+| 00 | Assignment              | :=   | <-   | Assign and return new value          |       |
+|    |                         | =:   |      | Assign and return old value          | [1]   |
+| 01 | Coalesce                | ?    | ->   | First non-`null` value else last     |       |
+| 02 | Logical                 | or   | . <- | First `true` value else last         |       |
+| 03 |                         | xor  | . -> |                                      |       |
+| 04 |                         | and  | . <- | First `false` value else last        |       |
+| 05 |                         | not  | .    | The negation of value casted to bool |       |
+| 06 | Comparison              | \>   | . .  | Greater than                         |       |
+|    |                         | \<   | . .  | Lesser than                          |       |
+|    |                         | \>=  | . .  | Greater than or equal                |       |
+|    |                         | \<=  | . .  | Lesser than or equal                 |       |
+|    |                         | ==   | . .  | Equal                                |       |
+|    |                         | !=   | . .  | Not equal                            |       |
+| 07 | Bitwise boolean algebra | \|   |      | Bitwise `or`                         |       |
+| 08 |                         | \^   |      | Bitwise `xor`                        |       |
+| 09 |                         | \&   |      | Bitwise `and`                        |       |
+| 10 | Bitwise shifts          | \<\< | ->   | Bitwise left shift                   |       |
+|    | Bitwise shifts          | \>\> | ->   | Bitwise right shift                  |       |
+| 11 | Math additive           | +    |      | Addition                             |       |
+|    | Math additive           | -    |      | Subtraction                          |       |
+| 12 | Math multiplicative     | *    |      | Multiplication                       |       |
+|    | Math multiplicative     | /    |      | Division                             |       |
+|    | Math multiplicative     | //   |      | Floor division                       |       |
+|    | Math multiplicative     | %    |      | Modulo                               |       |
+|    | Math multiplicative     | **   |      | Power                                |       |
+|    | Math multiplicative     | @    |      | Matrix multiplication                |       |
+| 13 | Math multiplicative     |      |      |                                      |       |
+
+
+[1] - Undefined variable counterparts return `null`

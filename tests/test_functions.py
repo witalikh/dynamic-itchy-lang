@@ -54,3 +54,55 @@ class TestFunctions:
         actual_value = self.interpreter.execute(code)
         assert actual_value == expected
 
+    def test_polymorphism(self):
+        code = """
+        
+        range := function(a, ...args) {
+            [start, stop, step, ..._] := if (#args == 0) [0, a, 1] elif (#args == 1) [a, ...args, 1] else [a, ...args];
+            
+            [result, i] := [[], start];
+            while (i < stop) [result, i] := [[...result, i], i + step];
+            result;
+        }
+        
+        a := range(1, 10, 2);
+        b := range(5);
+        c := range(3, 8);
+        
+        [a, b, c]
+        """
+        expected = [
+            [1, 3, 5, 7, 9],
+            [0, 1, 2, 3, 4],
+            [3, 4, 5, 6, 7],
+        ]
+
+        actual_value = self.interpreter.execute(code)
+        assert actual_value == expected
+
+
+    def test_variadic(self):
+        code = """
+
+        range := function(a, ...args) {
+            [start, stop, step, ..._] := if (#args == 0) [0, a, 1] elif (#args == 1) [a, ...args, 1] else [a, ...args];
+
+            [result, i] := [[], start];
+            while (i < stop) [result, i] := [[...result, i], i + step];
+            result;
+        }
+
+        a := range(1, 10, 2);
+        b := range(5);
+        c := range(3, 8);
+
+        [a, b, c]
+        """
+        expected = [
+            [1, 3, 5, 7, 9],
+            [0, 1, 2, 3, 4],
+            [3, 4, 5, 6, 7],
+        ]
+
+        actual_value = self.interpreter.execute(code)
+        assert actual_value == expected

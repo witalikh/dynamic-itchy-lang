@@ -18,8 +18,21 @@ class Parser:
         self.tokens = [lex for lex in lexer]
         self.i = 0
 
+    def get_prev(self) -> None:
+        self.i -= 1
+
     def get_next(self) -> None:
         self.i += 1
+
+    def was_previous_consumable(self, token_type: Lexemes, token_value: str | None = None) -> bool:
+        if self.prev_token is None:
+            return False
+
+        if token_value is None:
+            return self.prev_token[0] == token_type
+
+        return self.prev_token[0:2] == (token_type, token_value)
+
 
     def is_consumable(self, token_type: Lexemes, token_value: str | None = None) -> bool:
         if self.curr_token is None:
@@ -66,6 +79,14 @@ class Parser:
     def pos(self):
         return self.prev_token[3] if self.prev_token else -1
 
+    def skip_endlines(self) -> None:
+        while self.is_consumable(Lexemes.END_LINE):
+            self.get_next()
+
+    def revert_last_endline(self):
+        if self.was_previous_consumable(Lexemes.END_LINE):
+            self.get_prev()
+
     def parse_program(self) -> ScopeNode:
         scope_node = ScopeNode(0, 0)
 
@@ -82,8 +103,7 @@ class Parser:
             self.consume(Lexemes.END_LINE)
 
         value: ASTRoot = self.parse_assignment()
-        while self.is_consumable(Lexemes.END_LINE):
-            self.consume(Lexemes.END_LINE)
+        self.skip_endlines()
         return value
 
     def parse_assignment(self) -> OperatorNode | ASTRoot:
@@ -440,15 +460,19 @@ class Parser:
 
         if_else_node = IfElseNode(self.line, self.pos)
         if_else_node.add_branch(self.parse_condition(), self.parse_scope())
+        self.skip_endlines()
 
         while self.is_consumable(Lexemes.KEYWORD, 'elif'):
             _ = self.consume(Lexemes.KEYWORD)
             if_else_node.add_branch(self.parse_condition(), self.parse_scope())
+            self.skip_endlines()
 
         if self.is_consumable(Lexemes.KEYWORD, 'else'):
             self.consume(Lexemes.KEYWORD)
             if_else_node.add_branch(None, self.parse_scope())
+            self.skip_endlines()
 
+        self.revert_last_endline()
         return if_else_node
 
     def parse_while(self) -> WhileNode:
@@ -456,25 +480,6 @@ class Parser:
         return WhileNode(self.line, self.pos, self.parse_condition(), self.parse_scope())
 
     def parse_class(self) -> ClassDeclarationNode:
-        """
-
-        func_1(a, b) := ...
-        func_2(a, b, c) := ...
-
-        func = func_1 or func_2
-        func(a, b) <=> func_
-
-        person := class (_name, _age, _status) {
-            name := _name;
-            age := _age;
-            status := _status;
-
-            get_year_of_birth := function() 2024 - age;
-        }
-
-        :return:
-        """
-
         params = []
         self.consume(Lexemes.KEYWORD)
         self.consume(Lexemes.OPEN_BRACKET)
@@ -502,12 +507,26 @@ class Parser:
 
         self.consume(Lexemes.OPEN_BRACKET)
         while not self.is_consumable(Lexemes.CLOSED_BRACKET):
-            params.append(
-                IdentifierNode(
-                    name=self.consume(Lexemes.IDENTIFIER),
-                    line=self.line, pos=self.pos  # Intentional code design: firstly consume, then get location
+            if self.is_consumable(Lexemes.IDENTIFIER):
+                params.append(
+                    IdentifierNode(
+                        name=self.consume(Lexemes.IDENTIFIER),
+                        line=self.line, pos=self.pos  # Intentional code design: firstly consume, then get location
+                    )
                 )
-            )
+            elif self.is_consumable(Lexemes.OP_ELLIPSIS):
+                self.consume(Lexemes.OP_ELLIPSIS)
+                params.append(
+                    EllipsisOperatorNode(
+                        self.line, self.pos,
+                        IdentifierNode(
+                            name=self.consume(Lexemes.IDENTIFIER),
+                            line=self.line, pos=self.pos  # Intentional code design: firstly consume, then get location
+                        )
+                    )
+                )
+            else:
+                self.error("Unexpected token in function declaration params")
             if self.is_consumable(Lexemes.CLOSED_BRACKET):
                 break
 
