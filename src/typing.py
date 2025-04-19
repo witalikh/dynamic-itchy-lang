@@ -1,10 +1,11 @@
 from typing import Union, Callable
+from collections.abc import Sequence
 
 
 TResult = Union[None, bool, int, float, complex, str, dict, Callable, "ListWrapper"]
 
 
-class ListWrapper:
+class ListWrapper(Sequence):
 
     def __init__(self, literal: list):
         self.content = literal

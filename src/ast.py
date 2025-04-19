@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from itertools import chain, islice, pairwise
-from typing import Optional, List, Dict, LiteralString, Union, Iterator, Callable, IO
+from typing import Optional, List, Dict, Union, Iterator, Callable, IO
+
+from collections.abc import Sequence
 
 from src.exceptions import (
     DIRuntimeSyntaxError, DITypeError, DIZeroDivisionError,
@@ -28,6 +29,16 @@ class ASTRoot(ABC):
     @abstractmethod
     def serialize(self, stdout: IO) -> None:
         pass
+
+    @staticmethod
+    def evaluate_arg_list(args: list["ASTRoot"], environment: dict, allow_ellipsis: bool = True):
+        result = []
+        for arg in args:
+            if isinstance(arg, EllipsisOperatorNode):
+                result.extend(arg.evaluate(environment, allow_ellipsis))
+            else:
+                result.append(arg.evaluate(environment))
+        return result
 
 
 class ScopeNode(ASTRoot):
@@ -104,13 +115,14 @@ class WhileNode(ASTRoot):
 
 
 class AssignmentNode(ASTRoot):
-    def __init__(self, line: int, pos: int, operands: List[ASTRoot], orders: List[bool]) -> None:
+    def __init__(self, line: int, pos: int, lhs: ASTRoot, rhs: ASTRoot) -> None:
         super().__init__(line, pos)
-        self.chain_of_assignments: List[ASTRoot] = operands or []
-        self.chain_of_orders = orders or []
+        self.lhs = lhs
+        self.rhs = rhs
 
     @staticmethod
-    def evaluate_if_not(value: Union[ASTRoot, TResult], environment: Dict) -> TResult:
+    def evaluation_guard(value: Union[ASTRoot, TResult], environment: Dict) -> TResult:
+        # TODO: crutch
         if isinstance(value, ASTRoot):
             return value.evaluate(environment)
         return value
@@ -119,147 +131,136 @@ class AssignmentNode(ASTRoot):
     def perform_assignment(
             lhs: ASTRoot,
             rhs: Union[ASTRoot, TResult],
-            return_old: bool,
             environment: Dict
     ) -> TResult:
         if isinstance(lhs, IdentifierNode):
-            return AssignmentNode.assign_identifier(lhs, rhs, return_old, environment)
-        if isinstance(lhs, OperatorNode):
-            if lhs.operator == '$index':
-                return AssignmentNode.assign_indexation(lhs, rhs, return_old, environment)
-            if lhs.operator == "$attr":
-                return AssignmentNode.assign_member(lhs, rhs, return_old, environment)
+            return AssignmentNode.assign_identifier(lhs, rhs, environment)
+        if isinstance(lhs, IndexationNode):
+            return AssignmentNode.assign_indexation(lhs, rhs, environment)
+        if isinstance(lhs, AttributeCallNode):
+            return AssignmentNode.assign_member(lhs, rhs, environment)
         if isinstance(lhs, ListNode):
-            return AssignmentNode.assign_list(lhs, rhs, return_old, environment)
+            return AssignmentNode.assign_list(lhs, rhs, environment)
         raise ValueError(f"cannot assign to expression here: {lhs}")
 
     @staticmethod
     def assign_identifier(
             lhs: "IdentifierNode",
             rhs: Union[ASTRoot, TResult],
-            return_old: bool,
             environment: Dict
     ) -> TResult:
-        new_value = AssignmentNode.evaluate_if_not(rhs, environment)
-        if return_old:
-            old_value = environment.get(lhs.name, None)
-            environment[lhs.name] = new_value
-            return old_value
-        else:
-            environment[lhs.name] = new_value
-            return new_value
+        new_value = AssignmentNode.evaluation_guard(rhs, environment)
+        environment[lhs.name] = new_value
+        return new_value
 
     @staticmethod
-    def assign_list(
-            lhs: Union["ListNode", list[Union["IdentifierNode", "EllipsisOperatorNode"]]],
-            rhs: Union[ASTRoot, TResult, list[Union["IdentifierNode", "EllipsisOperatorNode"]]],
-            return_old: bool,
-            environment: Dict,
+    def _check_lhs_ellipses_for_list_assignment(
+        lhs: Union["ListNode", list[Union["IdentifierNode", "EllipsisOperatorNode"]]],
+        rhs
+    ):
 
-    ) -> TResult:
-        rhs_value = AssignmentNode.evaluate_if_not(rhs, environment)
-        if not isinstance(rhs_value, (ListWrapper, str, list)):
-            raise ValueError(
-                f"cannot unpack non-iterable {type(rhs)} object")
-
-        ellipses_count = 0
-        ellipsis_element = None
-        slice_of_rhs = None
+        ellipsis_exists = False
+        rhs_ellipsis_element = None
+        consumed_rhs_slice = None
 
         for idx, x in enumerate(lhs):
             if not isinstance(x, EllipsisOperatorNode):
                 continue
-            ellipses_count += 1
-            if ellipses_count > 1:
-                raise ValueError(
-                    f"too many unpacking expressions in assignment")
-            ellipsis_element = x.elements
-            if not isinstance(ellipsis_element, IdentifierNode):
-                pass
-            slice_of_rhs = slice(idx, idx + len(rhs_value) - len(lhs) + 1)
 
-        if (len(lhs) > len(rhs_value) and not ellipses_count) or len(lhs) > len(rhs_value) + 1:
-            raise ValueError(
-                f"not enough values to unpack (expected {len(lhs)}, got {len(rhs_value)})")
+            if ellipsis_exists:
+               raise ValueError(f"too many unpacking expressions in assignment")
+            ellipsis_exists = True
 
-        if len(lhs) < len(rhs_value) and not ellipses_count:
-            raise ValueError(
-                f"too many values to unpack (expected {len(lhs)}, got {len(rhs_value)})")
+            rhs_ellipsis_element = x.elements
+            # if not isinstance(rhs_ellipsis_element, IdentifierNode):
+            #     pass
+            consumed_rhs_slice = slice(idx, idx + len(rhs) - len(lhs) + 1)
 
-        lhs_old_value = None
-        if return_old:
-            lhs_old_value = lhs.evaluate(environment)
+        if (len(lhs) > len(rhs) and not ellipsis_exists) or len(lhs) > len(rhs) + 1:
+            raise ValueError(f"not enough values to unpack (expected {len(lhs)}, got {len(rhs)})")
 
-        if ellipses_count:
-            mono_lhs = chain(islice(lhs, 0, slice_of_rhs.start), islice(lhs, slice_of_rhs.start + 1, None))
-            mono_rhs = chain(islice(rhs_value, 0, slice_of_rhs.start), islice(rhs_value, slice_of_rhs.stop, None))
+        if len(lhs) < len(rhs) and not ellipsis_exists:
+            raise ValueError(f"too many values to unpack (expected {len(lhs)}, got {len(rhs)})")
 
-            rhs_slice = rhs_value[slice_of_rhs]
-            AssignmentNode.perform_assignment(ellipsis_element, rhs_slice, return_old, environment)
+        return ellipsis_exists, rhs_ellipsis_element, consumed_rhs_slice
 
-            for i, v in zip(mono_lhs, mono_rhs, strict=True):
-                AssignmentNode.perform_assignment(i, v, return_old, environment)
-        else:
-            for i, v in zip(lhs, rhs_value, strict=True):
-                AssignmentNode.perform_assignment(i, v, return_old, environment)
-        if return_old:
-            return lhs_old_value
-        return rhs_value
+    @staticmethod
+    def _assign_to_list_with_ellipses(
+            lhs: Union["ListNode", list[Union["IdentifierNode", "EllipsisOperatorNode"]]],
+            rhs: Union[ASTRoot, TResult],
+            ellipsis_assignee,
+            slice_of_rhs: slice,
+            environment: Dict,
+    ) -> None:
+
+        for idx in range(slice_of_rhs.start):
+            AssignmentNode.perform_assignment(lhs[idx], rhs[idx], environment)
+
+        AssignmentNode.perform_assignment(ellipsis_assignee, rhs[slice_of_rhs], environment)
+
+        for l_idx, r_idx in zip(range(slice_of_rhs.start + 1, len(lhs)), range(slice_of_rhs.stop, len(rhs))):
+            AssignmentNode.perform_assignment(lhs[l_idx], rhs[r_idx], environment)
+
+    @staticmethod
+    def assign_list(
+            lhs: Union["ListNode", list[Union["IdentifierNode", "EllipsisOperatorNode"]]],
+            rhs: Union[ASTRoot, TResult],
+            environment: Dict,
+
+    ) -> TResult:
+        #
+        rhs = AssignmentNode.evaluation_guard(rhs, environment)
+
+        #ensure it's a list
+        if not isinstance(rhs, Sequence):
+            raise ValueError(f"cannot unpack non-iterable {type(rhs)} object")
+
+        ellipsis_exists, ellipsis_assignee, slice_of_rhs = (
+            AssignmentNode._check_lhs_ellipses_for_list_assignment(lhs, rhs))
+
+        if ellipsis_exists:
+            AssignmentNode._assign_to_list_with_ellipses(lhs, rhs, ellipsis_assignee, slice_of_rhs, environment)
+            return rhs
+
+        for i, v in zip(lhs, rhs):
+            AssignmentNode.perform_assignment(i, v, environment)
+        return rhs
 
     @staticmethod
     def assign_indexation(
-            lhs: "OperatorNode",
+            lhs: "IndexationNode",
             rhs: Union[ASTRoot, TResult],
-            return_old: bool,
             environment: Dict
     ) -> TResult:
-        primary, *intermediate, last = lhs.operands
-        value = primary.evaluate(environment)
+        *intermediate, last = lhs.args
+        value = lhs.iter.evaluate(environment)
 
         for i in intermediate:
             value = value[i.evaluate(environment)]
 
-        new_value = AssignmentNode.evaluate_if_not(rhs, environment)
-        if return_old:
-            old_value = value[last.evaluate(environment)]
-            value[last.evaluate(environment)] = new_value
-            return old_value
-        else:
-            value[last.evaluate(environment)] = new_value
-            return new_value
+        new_value = AssignmentNode.evaluation_guard(rhs, environment)
+        value[last.evaluate(environment)] = new_value
+        return new_value
 
     @staticmethod
     def assign_member(
-            lhs: "OperatorNode",
+            lhs: "AttributeCallNode",
             rhs: Union[ASTRoot, TResult],
-            return_old: bool,
             environment: Dict
     ) -> TResult:
-        primary, *intermediate, last = lhs.operands
-        value = primary.evaluate(environment)
+        value = lhs.obj.evaluate(environment)
 
-        for i in intermediate:
-            value = value[i.name]
-
-        new_value = AssignmentNode.evaluate_if_not(rhs, environment)
-        if return_old:
-            old_value = value.get(last.name, None)
-            value[last.name] = new_value
-            return old_value
-        else:
-            value[last.name] = new_value
-            return new_value
+        new_value = AssignmentNode.evaluation_guard(rhs, environment)
+        value[lhs.member.name] = new_value
+        return new_value
 
     def evaluate(self, environment: Dict) -> TResult:
-        rhs = self.chain_of_assignments[-1]
         try:
-            for identifier, return_old in zip(reversed(self.chain_of_assignments[:-1]), reversed(self.chain_of_orders)):
-                rhs = self.perform_assignment(identifier, rhs, return_old, environment)
+            return self.perform_assignment(self.lhs, self.rhs, environment)
         except ValueError as e:
             raise DIRuntimeSyntaxError(self.line, self.pos, str(e))
         except IndexError as e:
             raise DIIndexError(self.line, self.pos, str(e))
-        return rhs
 
     def serialize(self, stdout: IO) -> None:
         # TODO: serialization
@@ -267,98 +268,29 @@ class AssignmentNode(ASTRoot):
 
 
 class OperatorNode(ASTRoot):
-    def __init__(self, line: int, pos: int, operator: LiteralString, operands: List[Union[ASTRoot]]) -> None:
+    def __init__(self, line: int, pos: int, operator: str, lhs: ASTRoot, rhs: ASTRoot) -> None:
         super().__init__(line, pos)
-        self.operator: LiteralString = operator
-        self.operands: List[ASTRoot] = operands
+        self.lhs = lhs
+        self.rhs = rhs
+        self.operator = operator
         """
         $ index: list of lists of ...
         $ attr: list of Identifier Nodes
         """
 
     def evaluate_or(self, environment: Dict) -> TResult:
-        for operand in self.operands[:-1]:
-            result = operand.evaluate(environment)
-            if result:
-                return result
-        return self.operands[-1].evaluate(environment)
+        return self.lhs.evaluate(environment) or self.rhs.evaluate(environment)
 
     def evaluate_and(self, environment: Dict) -> TResult:
-        for operand in self.operands[:-1]:
-            result = operand.evaluate(environment)
-            if not result:
-                return result
-        return self.operands[-1].evaluate(environment)
+        return self.lhs.evaluate(environment) and self.rhs.evaluate(environment)
 
     def evaluate_coalesce(self, environment: Dict) -> TResult:
-        for operand in self.operands:
-            result = operand.evaluate(environment)
-            if result is not None:
-                return result
-        return self.operands[-1].evaluate(environment)
+        result = self.lhs.evaluate(environment)
+        # TODO: NoneNode?
+        if result is not None:
+            return result
+        return self.rhs.evaluate(environment)
 
-    def evaluate_power(self, environment: Dict) -> TResult:
-        value = self.operands[-1].evaluate(environment)
-        for operand in reversed(self.operands[:-1]):
-            value = operand.evaluate(environment) ** value
-        return value
-
-    def evaluate_bitwise_xor(self, environment: Dict) -> TResult:
-        value = self.operands[0].evaluate(environment)
-        for operand in self.operands[1:]:
-            value = value ^ operand.evaluate(environment)
-        return value
-
-    def evaluate_bitwise_and(self, environment: Dict) -> TResult:
-        value = self.operands[0].evaluate(environment)
-        for operand in self.operands[1:]:
-            value = value & operand.evaluate(environment)
-        return value
-
-    def evaluate_bitwise_or(self, environment: Dict) -> TResult:
-        value = self.operands[0].evaluate(environment)
-        for operand in self.operands[1:]:
-            value = value | operand.evaluate(environment)
-        return value
-
-    def evaluate_func_call(self, environment: Dict) -> TResult:
-        primary = self.operands[0]
-        func = primary.evaluate(environment)
-
-        is_method = False
-        obj = None
-        if isinstance(primary, OperatorNode) and primary.operator == "$attr":
-            is_method = True
-            obj = primary.operands[0].evaluate(environment)
-
-        for operand in self.operands[1:]:
-            if not callable(func):
-                raise DITypeError(self.line, self.pos, f'Not a function: {func}')
-            if is_method:
-                func = func([obj] + [o.evaluate(environment) for o in operand])
-            else:
-                func = func([o.evaluate(environment) for o in operand])
-        return func
-
-    def evaluate_indexation(self, environment: Dict) -> TResult:
-        primary, *indexers = self.operands
-        value = primary.evaluate(environment)
-        try:
-            for index in chain.from_iterable(indexers):
-                value = value[index.evaluate(environment)]
-        except IndexError as e:
-            raise DIIndexError(self.line, self.pos, str(e))
-        return value
-
-    def evaluate_member_access(self, environment: Dict) -> TResult:
-        primary, *indexers = self.operands
-        value = primary.evaluate(environment)
-        try:
-            for indexer in indexers:
-                value = value[indexer.name]
-        except IndexError as e:
-            raise DIIndexError(self.line, self.pos, str(e))
-        return value
 
     def evaluate(self, environment: Dict) -> TResult:
         match self.operator:
@@ -369,19 +301,115 @@ class OperatorNode(ASTRoot):
             case '?':
                 return self.evaluate_coalesce(environment)
             case '**':
-                return self.evaluate_power(environment)
+                return self.lhs.evaluate(environment) ** self.rhs.evaluate(environment)
             case '^':
-                return self.evaluate_bitwise_xor(environment)
+                return self.lhs.evaluate(environment) ^ self.rhs.evaluate(environment)
             case '&':
-                return self.evaluate_bitwise_and(environment)
+                return self.lhs.evaluate(environment) & self.rhs.evaluate(environment)
             case '|':
-                return self.evaluate_bitwise_or(environment)
-            case '$func':
-                return self.evaluate_func_call(environment)
-            case '$index':
-                return self.evaluate_indexation(environment)
-            case '$attr':
-                return self.evaluate_member_access(environment)
+                return self.lhs.evaluate(environment) | self.rhs.evaluate(environment)
+            case '+':
+                return self.lhs.evaluate(environment) + self.rhs.evaluate(environment)
+            case '-':
+                return self.lhs.evaluate(environment) - self.rhs.evaluate(environment)
+            case '*':
+                return self.lhs.evaluate(environment) * self.rhs.evaluate(environment)
+            case '/':
+                lhs = self.lhs.evaluate(environment)
+                rhs = self.rhs.evaluate(environment)
+                try:
+                    return lhs / rhs
+                except ZeroDivisionError:
+                    raise DIZeroDivisionError(self.line, self.pos, f"cannot divide: {lhs} / {rhs}.")
+
+            case '//':
+                lhs = self.lhs.evaluate(environment)
+                rhs = self.rhs.evaluate(environment)
+                try:
+                    return lhs // rhs
+                except ZeroDivisionError:
+                    raise DIZeroDivisionError(self.line, self.pos, f"cannot divide: {lhs} // {rhs}")
+
+            case '%':
+                lhs = self.lhs.evaluate(environment)
+                rhs = self.rhs.evaluate(environment)
+                try:
+                    return lhs % rhs
+                except ZeroDivisionError:
+                    raise DIZeroDivisionError(self.line, self.pos, f"cannot divide: {lhs} % {rhs}")
+            case '@':
+                try:
+                    return self.lhs.evaluate(environment) @ self.rhs.evaluate(environment)
+                except TypeError as e:
+                    raise DITypeError(self.line, self.pos, str(e)) from None
+                except ValueError as e:
+                    raise DIValueError(self.line, self.pos, str(e)) from None
+            case '<<':
+                return self.lhs.evaluate(environment) << self.rhs.evaluate(environment)
+            case '>>':
+                return self.lhs.evaluate(environment) >> self.rhs.evaluate(environment)
+
+
+    def serialize(self, stdout: IO) -> None:
+        # TODO: serialization
+        pass
+
+
+class FunctionCallNode(ASTRoot):
+    def __init__(self, line: int, pos: int, func: ASTRoot, args: List[ASTRoot]) -> None:
+        super().__init__(line, pos)
+        self.func = func
+        self.args = args
+
+    def evaluate(self, environment: Dict) -> TResult:
+        func = self.func.evaluate(environment)
+
+        if isinstance(self.func, AttributeCallNode):
+            obj = self.func.obj.evaluate(environment)
+            return func([obj] + ASTRoot.evaluate_arg_list(self.args, environment))
+
+        if not callable(func):
+            raise DITypeError(self.line, self.pos, f'Not a function: {func}')
+
+        return func(ASTRoot.evaluate_arg_list(self.args, environment))
+
+    def serialize(self, stdout: IO) -> None:
+        # TODO: serialization
+        pass
+
+
+class IndexationNode(ASTRoot):
+    def __init__(self, line: int, pos: int, iter_: ASTRoot, args: List[ASTRoot]) -> None:
+        super().__init__(line, pos)
+        self.iter = iter_
+        self.args = args
+
+    def evaluate(self, environment: Dict) -> TResult:
+        value = self.iter.evaluate(environment)
+        try:
+            for index in self.args:
+                value = value[index.evaluate(environment)]
+        except IndexError as e:
+            raise DIIndexError(self.line, self.pos, str(e))
+        return value
+
+    def serialize(self, stdout: IO) -> None:
+        # TODO: serialization
+        pass
+
+
+class AttributeCallNode(ASTRoot):
+    def __init__(self, line: int, pos: int, obj: ASTRoot, member: "IdentifierNode") -> None:
+        super().__init__(line, pos)
+        self.obj = obj
+        self.member = member
+
+    def evaluate(self, environment: Dict) -> TResult:
+        value = self.obj.evaluate(environment)
+        try:
+            return value[self.member.name]
+        except IndexError as e:
+            raise DIIndexError(self.line, self.pos, str(e))
 
     def serialize(self, stdout: IO) -> None:
         # TODO: serialization
@@ -389,92 +417,31 @@ class OperatorNode(ASTRoot):
 
 
 class ComparisonNode(ASTRoot):
-    def __init__(self, line: int, pos: int, operators: List[str], operands: List[ASTRoot]) -> None:
+    def __init__(self, line: int, pos: int, operator: str, lhs: ASTRoot, rhs: ASTRoot) -> None:
         super().__init__(line, pos)
-        self.operators = operators
-        self.operands = operands
+        self.operator = operator
+        self.lhs = lhs
+        self.rhs = rhs
 
-    # TODO: wrapper
     def evaluate(self, environment: Dict) -> bool:
 
-        result = True
-        for op, (lhs_, rhs_) in zip(self.operators, pairwise(self.operands)):
+        lhs = self.lhs.evaluate(environment)
+        rhs = self.rhs.evaluate(environment)
 
-            lhs = lhs_.evaluate(environment)
-            rhs = rhs_.evaluate(environment)
-
-            if op == '<=':
-                result = lhs <= rhs
-            elif op == '>=':
-                result = lhs >= rhs
-            elif op == '<':
-                result = lhs < rhs
-            elif op == '>':
-                result = lhs > rhs
-            elif op == '==':
-                result = lhs == rhs
-            elif op == '!=':
-                result = lhs != rhs
-
-            if not result:
-                return False
-        return True
-
-    def serialize(self, stdout: IO) -> None:
-        # TODO: serialization
-        pass
-
-
-class LeftPolyOperatorNode(ASTRoot):
-    def __init__(self, line: int, pos: int, operators: List[str], operands: List[ASTRoot]) -> None:
-        super().__init__(line, pos)
-        self.operators = operators
-        self.operands = operands
-
-    def evaluate(self, environment: Dict) -> TResult:
-
-        lhs = self.operands[0].evaluate(environment)
-        iterator = zip(self.operators, self.operands[1:])
-
-        for op, next_value in iterator:
-            rhs = next_value.evaluate(environment)
-
-            if op == '+':
-                value = lhs + rhs
-            elif op == '-':
-                value = lhs - rhs
-            elif op == '*':
-                value = lhs * rhs
-            elif op == '/':
-                try:
-                    value = lhs / rhs
-                except ZeroDivisionError:
-                    raise DIZeroDivisionError(self.line, self.pos, f"cannot divide: {lhs} / {rhs}. Rhs is {next_value}")
-            elif op == '//':
-                try:
-                    value = lhs // rhs
-                except ZeroDivisionError:
-                    raise DIZeroDivisionError(self.line, self.pos, f"cannot divide: {lhs} // {rhs}")
-            elif op == '%':
-                try:
-                    value = lhs % rhs
-                except ZeroDivisionError:
-                    raise DIZeroDivisionError(self.line, self.pos, f"cannot divide: {lhs} % {rhs}")
-            elif op == '@':
-                try:
-                    value = lhs @ rhs
-                except TypeError as e:
-                    raise DITypeError(self.line, self.pos, str(e))
-                except ValueError as e:
-                    raise DIValueError(self.line, self.pos, str(e))
-            elif op == '<<':
-                value = lhs << rhs
-            elif op == '>>':
-                value = lhs >> rhs
-            else:
-                value = None
-            lhs = value
-        return lhs
+        match self.operator:
+            case '<=':
+                return lhs <= rhs
+            case '>=':
+                return lhs >= rhs
+            case '<':
+                return lhs < rhs
+            case '>':
+                return lhs > rhs
+            case '==':
+                return lhs == rhs
+            case '!=':
+                return lhs != rhs
+        return False
 
     def serialize(self, stdout: IO) -> None:
         # TODO: serialization
@@ -519,7 +486,7 @@ class FunctionDeclarationNode(ASTRoot):
         def func(params):
             environment_copy = environment.copy()
             try:
-                AssignmentNode.assign_list(self.params, params, False, environment_copy)
+                AssignmentNode.assign_list(self.params, params, environment_copy)
                 return self.body.evaluate(environment_copy)
             except ValueError as e:
                 # TODO:
@@ -545,8 +512,9 @@ class ClassDeclarationNode(ASTRoot):
     def evaluate(self, environment: Dict) -> Callable:
         def func(params):
             env = environment.copy()
-            for (param, arg) in zip(self.params, params, strict=True):
-                env[param.name] = arg
+            AssignmentNode.assign_list(self.params, params, env)
+            # for (param, arg) in zip(self.params, params, strict=True):
+            #     env[param.name] = arg
             self.body.evaluate(env, False)
             return env
 
@@ -558,7 +526,7 @@ class ClassDeclarationNode(ASTRoot):
 
 
 class EllipsisOperatorNode(ASTRoot):
-    def __init__(self, line: int, pos: int, list_value: Union["ListNode", "IdentifierNode"]) -> None:
+    def __init__(self, line: int, pos: int, list_value: Union["ListNode", "IdentifierNode", "ASTRoot"]) -> None:
         super().__init__(line, pos)
         self.elements = list_value
 

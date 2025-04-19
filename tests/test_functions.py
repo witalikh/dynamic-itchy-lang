@@ -106,3 +106,21 @@ class TestFunctions:
 
         actual_value = self.interpreter.execute(code)
         assert actual_value == expected
+
+    def test_variadic_2(self):
+        code = """
+
+        max := function(a, ...args) {
+            if (#args == 0) a else {
+                b := max(...args);
+                if (a >= b) a else b;
+            }
+        }
+
+        args := [10, 63, -17, 14, 2];
+        max(...args);
+        """
+        expected = 63
+
+        actual_value = self.interpreter.execute(code)
+        assert actual_value == expected
